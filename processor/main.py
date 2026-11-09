@@ -296,6 +296,13 @@ def main() -> int:
         log.error("INPUT_DIR %s is not a folder", input_dir)
         return 1
     # Writable caches under TMPDIR (Lambda-safe: only INPUT_DIR, OUTPUT_DIR, HOME and TMPDIR are writable).
+    for var in ("HOME", "TMPDIR"):      # the Lambda runtime sets them; create them when missing
+        if os.environ.get(var):
+            try:
+                Path(os.environ[var]).mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                log.warning("cannot create %s=%s: %s", var, os.environ[var], exc)
+    tempfile.tempdir = None
     tmp = Path(tempfile.gettempdir())
     for var, sub in (("MPLCONFIGDIR", "mpl"), ("NUMBA_CACHE_DIR", "numba"), ("XDG_CACHE_HOME", "cache")):
         if not os.environ.get(var):

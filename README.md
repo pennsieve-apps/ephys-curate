@@ -68,7 +68,8 @@ lazily in 1 s chunks):
 3. **SortingAnalyzer**, sparse (`radius_um=SPARSITY_RADIUS_UM`, 100 µm), with the extensions of
    the AIND ephys pipeline (Buccino et al. 2026): `random_spikes` (`MAX_SPIKES_PER_UNIT`, 500),
    `noise_levels`, `waveforms` (−2/+3 ms), `templates` (mean, std), `spike_amplitudes`,
-   `amplitude_scalings`, `unit_locations` (monopolar triangulation), `spike_locations` (grid
+   `amplitude_scalings` (without collision handling: with it, it took 9× longer and ran out of 8 GB
+   on 449 units of the IBL probe), `unit_locations` (monopolar triangulation), `spike_locations` (grid
    convolution), `correlograms` (±25 ms, 1 ms bins), `template_similarity`, `template_metrics`
    (with multi-channel metrics), `principal_components` (5 PCs per channel, `PCA_METRICS`) and
    `quality_metrics`: num_spikes, firing_rate, presence_ratio, snr, isi_violation, rp_violation,

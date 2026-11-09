@@ -142,7 +142,7 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float):
         ("waveforms", dict(ms_before=2.0, ms_after=3.0)),
         ("templates", dict(operators=["average", "std"])),
         ("spike_amplitudes", {}),
-        ("amplitude_scalings", {}),
+        ("amplitude_scalings", dict(handle_collisions=False)),
         ("unit_locations", dict(method="monopolar_triangulation")),
         ("spike_locations", dict(method="grid_convolution", seed=p["SEED"])),
         ("correlograms", dict(window_ms=50.0, bin_ms=1.0)),
