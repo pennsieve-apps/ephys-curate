@@ -52,8 +52,8 @@ references:
   doi: 10.7554/eLife.61834
   identifiers:
   - type: other
-    value: PMID:33170122
-    description: PubMed ID
+    value: '33170122'
+    description: PubMed ID (PMID)
 - type: software
   title: 'Bombcell: automated curation and cell classification of spike-sorted electrophysiology data'
   authors:
@@ -143,8 +143,8 @@ references:
   doi: 10.7554/eLife.78362
   identifiers:
   - type: other
-    value: PMID:36193886
-    description: PubMed ID
+    value: '36193886'
+    description: PubMed ID (PMID)
 - type: article
   title: Efficient and reproducible pipelines for spike sorting large-scale electrophysiology data
   authors:
@@ -165,8 +165,8 @@ references:
   doi: 10.7554/eLife.110170
   identifiers:
   - type: other
-    value: PMID:42554034
-    description: PubMed ID
+    value: '42554034'
+    description: PubMed ID (PMID)
 - type: article
   title: Quality Metrics to Accompany Spike Sorting of Extracellular Signals
   authors:
@@ -185,8 +185,8 @@ references:
   doi: 10.1523/JNEUROSCI.0971-11.2011
   identifiers:
   - type: other
-    value: PMID:21677152
-    description: PubMed ID
+    value: '21677152'
+    description: PubMed ID (PMID)
 - type: article
   title: Spike sorting with Kilosort4
   authors:
@@ -207,8 +207,8 @@ references:
   doi: 10.1038/s41592-024-02232-7
   identifiers:
   - type: other
-    value: PMID:38589517
-    description: PubMed ID
+    value: '38589517'
+    description: PubMed ID (PMID)
 - type: data
   title: IBL - Brain Wide Map
   authors:
@@ -655,8 +655,8 @@ references:
   doi: 10.1038/s41586-025-09235-0
   identifiers:
   - type: other
-    value: PMID:40903598
-    description: PubMed ID
+    value: '40903598'
+    description: PubMed ID (PMID)
 - type: report
   title: Spike sorting pipeline for the International Brain Laboratory
   authors:
@@ -694,6 +694,36 @@ references:
     name: figshare
   doi: 10.6084/m9.figshare.28282841.v2
   repository-code: https://github.com/anoushkajain/UnitRefine
+- type: article
+  title: SLAy-ing oversplitting errors in high-density electrophysiology spike sorting
+  authors:
+  - family-names: Koukuntla
+    given-names: Sai
+  - family-names: DeWeese
+    given-names: Tate
+  - family-names: Cheng
+    given-names: Alexandra
+  - family-names: Mildren
+    given-names: Robyn
+  - family-names: Lawrence
+    given-names: Aamna
+  - family-names: Graves
+    given-names: Austin R.
+  - family-names: Cullen
+    given-names: Kathleen E.
+  - family-names: Colonell
+    given-names: Jennifer
+  - family-names: Harris
+    given-names: Timothy D.
+  - family-names: Charles
+    given-names: Adam S.
+  year: 2025
+  journal: bioRxiv
+  doi: 10.1101/2025.06.20.660590
+  identifiers:
+  - type: other
+    value: '40666932'
+    description: PubMed ID (PMID)
 - type: software
   title: 'Phy: interactive visualization and manual spike sorting of large-scale ephys data'
   authors:

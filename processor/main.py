@@ -25,6 +25,7 @@ import os
 import platform
 import shutil
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ APP_NAME = "ephys-curate"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULTS = {
+    "AUTO_MERGE": "true",
     "LABEL_RULE": "consensus",
     "PCA_METRICS": "true",
     "UNITREFINE": "true",
@@ -81,7 +83,7 @@ def read_parameters(env=os.environ) -> dict:
     p["REFERENCE_KIND"] = raw["REFERENCE_KIND"].strip().lower().replace("-", "_")
     if p["REFERENCE_KIND"] not in ("auto", "sorting", "ground_truth"):
         raise ParameterError("REFERENCE_KIND must be auto, sorting or ground_truth")
-    for k in ("PCA_METRICS", "UNITREFINE", "EXPORT_PHY"):
+    for k in ("AUTO_MERGE", "PCA_METRICS", "UNITREFINE", "EXPORT_PHY"):
         p[k] = _bool(k, raw[k])
     if p["LABEL_RULE"] == "unitrefine" and not p["UNITREFINE"]:
         raise ParameterError("LABEL_RULE=unitrefine needs UNITREFINE=true")
@@ -293,8 +295,12 @@ def main() -> int:
     if not input_dir.is_dir():
         log.error("INPUT_DIR %s is not a folder", input_dir)
         return 1
-    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-    os.environ.setdefault("NUMBA_CACHE_DIR", "/tmp/numba")
+    # Writable caches under TMPDIR (Lambda-safe: only INPUT_DIR, OUTPUT_DIR, HOME and TMPDIR are writable).
+    tmp = Path(tempfile.gettempdir())
+    for var, sub in (("MPLCONFIGDIR", "mpl"), ("NUMBA_CACHE_DIR", "numba"), ("XDG_CACHE_HOME", "cache")):
+        if not os.environ.get(var):
+            os.environ[var] = str(tmp / sub)
+        Path(os.environ[var]).mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     try:
         p = read_parameters()
@@ -340,12 +346,13 @@ def main() -> int:
 
     top = output_dir / APP_NAME
     top.mkdir(parents=True, exist_ok=True)
-    work_root = Path(os.environ.get("TMPDIR", "/tmp")) / f"{APP_NAME}-work"
+    work_root = Path(tempfile.gettempdir()) / f"{APP_NAME}-work"
     statuses: dict = {}
     summaries: dict = {}
     figures: list = []
     tables: list = []
     all_units = []
+    merge_rows = []
     sheet_rows = []
     inputs_used = []
     citations = list(CITATIONS_BASE)
@@ -386,7 +393,23 @@ def main() -> int:
                 sorting = sorting.remove_units(empty)
             if sorting.get_num_units() == 0:
                 raise ValueError("no units with spikes")
-            ks = C.kslabels(sorting, sort_in.sorter_output, sorting.unit_ids)
+            ks_before = C.kslabels(sorting, sort_in.sorter_output, sorting.unit_ids)
+            if ks_before is not None:
+                sorting.set_property("KSLabel", np.array(ks_before))
+            merges = []
+            n_before = sorting.get_num_units()
+            if p["AUTO_MERGE"] and n_before > 1:
+                t_m = time.monotonic()
+                with Heartbeat(f"{sid}: auto-merge"):
+                    sorting, merges = C.auto_merge(sorting, recording, p)
+                log.info("%s: auto-merge (SLAy): %d groups merged, %d -> %d units, %.1fs", sid, len(merges),
+                         n_before, sorting.get_num_units(), time.monotonic() - t_m)
+                for new_id, group in merges:
+                    merge_rows.append({"session_id": sid, "unit_name": str(new_id),
+                                       "merged_unit_names": ";".join(str(g) for g in group),
+                                       "n_units_merged": len(group),
+                                       "n_spikes": int(sorting.count_num_spikes_per_unit()[new_id])})
+            ks = C.kslabels(sorting, None, sorting.unit_ids)
             duration = recording.get_duration()
             times, time_source = session_times(recording, rec_in.session, sid, warnings_out)
             log.info("%s: %d units, %d channels, %.1f s (%.3f-%.3f s on the session clock), sorting %s (%s)",
@@ -407,7 +430,7 @@ def main() -> int:
             if p["PCA_METRICS"]:
                 t_p = time.monotonic()
                 with Heartbeat(f"{sid}: PCA metrics"):
-                    pcam = C.pca_metrics(analyzer, seed=p["SEED"])
+                    pcam = C.pca_metrics(analyzer, seed=p["SEED"], n_jobs=threads)
                 metrics = metrics.join(pcam.reindex(metrics.index), how="left")
                 timings["pca_metrics"] = round(time.monotonic() - t_p, 2)
                 log.info("  PCA metrics: %.1fs", timings["pca_metrics"])
@@ -441,6 +464,8 @@ def main() -> int:
                 table["unitrefine_label"] = ""
             table["label"] = [C.final_label(b, u if isinstance(u, str) else None, p["LABEL_RULE"])
                               for b, u in zip(table["bombcell_label"], table["unitrefine_label"])]
+            merged_from = {str(n): ";".join(str(x) for x in g) for n, g in merges}
+            table["merged_from"] = [merged_from.get(str(u), "") for u in table.index]
             if ks is not None:
                 table["kslabel"] = ks
             for k in ("subject_id", "condition", "group"):
@@ -468,7 +493,20 @@ def main() -> int:
                         raise ValueError(f"no reference unit with {p['REFERENCE_MIN_SPIKES']}+ spikes inside the "
                                          "recording's window")
                     rtab, ref_summary = R.compare(sorting, table["label"], ref_sorting, kind, p["MATCH_DELTA_MS"])
-                    ref_summary["file"] = rinfo
+                    ref_summary["file"] = {k: v for k, v in rinfo.items() if not k.startswith("_")}
+                    for col, vals in (rinfo.get("_unit_labels") or {}).items():
+                        table[f"reference_{col}"] = [vals.get(m, "") if m else "" for m in
+                                                     rtab["reference_match"].reindex(table.index).fillna("")]
+                    ref_summary["sorter"] = sort_in.sort.get("sorter") or sort_in.kind
+                    q = (rinfo.get("_unit_labels") or {}).get("ibl_quality_score")
+                    if q:
+                        rt = ref_summary["_reference_table"]
+                        good_ref = rt[[float(q.get(r, 0) or 0) >= 1.0 for r in rt["reference_unit"]]]
+                        ref_summary["reference_good"] = {
+                            "definition": "ibl_quality_score == 1 (IBL 'good')",
+                            "n": int(len(good_ref)),
+                            "matched": int((good_ref["best_agreement"] >= R.MATCH_THRESHOLD).sum())}
+                        rt["ibl_quality_score"] = [q.get(r) for r in rt["reference_unit"]]
                     table["reference_match"] = rtab["reference_match"].reindex(table.index).fillna("")
                     table["reference_agreement"] = rtab["reference_agreement"].reindex(table.index).fillna(0.0)
                     ref_summary["_reference_table"].to_csv(top / f"{sid}_reference_units.csv", index=False)
@@ -552,6 +590,8 @@ def main() -> int:
             regions = table.assign(area=table["brain_area"].replace("", "unknown")).groupby("area")["label"] \
                 .value_counts().unstack(fill_value=0)
             s = {
+                "auto_merge": {"n_units_sorted": int(n_before), "n_merge_groups": len(merges),
+                               "n_units_after": int(sorting.get_num_units())} if p["AUTO_MERGE"] else None,
                 "bombcell_thresholds_note": thr_note or None,
                 "n_units": int(len(table)), "n_good": int(counts.get("good", 0)), "n_mua": int(counts.get("mua", 0)),
                 "n_noise": int(counts.get("noise", 0)), "bombcell": {k: int(v) for k, v in bcc.items()},
@@ -606,6 +646,10 @@ def main() -> int:
         units = units.drop(columns=["peak_channel_index", "unit_id"], errors="ignore")
         units.to_csv(top / "units.csv", index=False, float_format="%.6g")
         tables.insert(0, "units.csv")
+    if p["AUTO_MERGE"] and all_units:
+        mcols = ["session_id", "unit_name", "merged_unit_names", "n_units_merged", "n_spikes"]
+        pd.DataFrame(merge_rows, columns=mcols).to_csv(top / "merges.csv", index=False)
+        tables.append("merges.csv")
     if sheet_rows:
         with open(top / "sessions.csv", "w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=list(sheet_rows[0].keys()))

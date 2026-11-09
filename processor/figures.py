@@ -292,8 +292,13 @@ def agreement(sid: str, table: pd.DataFrame, summary: dict, path: Path) -> Path:
         ax.set_xlabel("reference units in the window, best first")
         ax.set_ylabel("best agreement with one of our units")
         ax.set_ylim(0, 1.02)
-        ax.set_title(f"Reference units recovered: {int((a >= 0.5).sum())} of {len(a)}", loc="left")
-    fig.suptitle(f"{sid}: agreement with the {'ground truth' if kind == 'ground_truth' else 'reference sorting'}",
+        title = f"Reference units recovered: {int((a >= 0.5).sum())} of {len(a)}"
+        rg = summary.get("reference_good")
+        if rg:
+            title += f"\n(reference 'good' units: {rg['matched']} of {rg['n']})"
+        ax.set_title(title, loc="left")
+    who = f" ({summary['sorter']})" if summary.get("sorter") else ""
+    fig.suptitle(f"{sid}: our sorting{who} vs the {'ground truth' if kind == 'ground_truth' else 'reference sorting'}",
                  fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(path, dpi=DPI)

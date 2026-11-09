@@ -126,6 +126,15 @@ def test_labels_recover_planted_units(default_run):
     assert set(u["bombcell_label"]) <= {"good", "mua", "noise", "non_soma"}
     assert set(u["unitrefine_label"]) <= {"sua", "mua", "noise"}
     assert set(u["brain_area"]) <= {"CA1", "VISp"}
+    assert "12" not in set(u["unit_name"])                      # merged back into unit 7
+
+
+@needs_models
+def test_auto_merge_recorded(default_run):
+    m = pd.read_csv(default_run / "merges.csv", dtype=str)
+    assert len(m) == 1 and m.loc[0, "unit_name"] == "7" and m.loc[0, "merged_unit_names"] == "7;12"
+    u = pd.read_csv(default_run / "units.csv", dtype={"unit_name": str, "merged_from": str})
+    assert u.set_index("unit_name").loc["7", "merged_from"] == "7;12"
 
 
 @needs_models
@@ -189,7 +198,7 @@ def test_numpy_engine_fixture_loads(tmp_path):
     s = si.load(tmp_path / "linked" / "sorting" / "spike-sort" / SID / "sorting")
     assert r.get_times()[0] == pytest.approx(FX.T_START)
     assert list(r.get_property("brain_area")[:1]) == ["CA1"]
-    assert s.get_num_units() == 12
+    assert s.get_num_units() == 13
 
 
 def test_streaming_pca_metrics_match_spikeinterface(fixture_dir):

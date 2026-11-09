@@ -5,7 +5,8 @@ application:
   description: >-
     Decides which spike-sorted units are well-isolated neurons. Builds a SpikeInterface
     SortingAnalyzer (waveforms, templates, unit locations, quality metrics) from the preprocessed
-    recording and its sorting (spike-sort output, or a Kilosort / Phy folder), labels every unit
+    recording and its sorting (spike-sort output, or a Kilosort / Phy folder), merges over-split
+    units (SLAy; Koukuntla, Charles and colleagues), labels every unit
     with Bombcell (rule-based thresholds; Fabre, Harris and Carandini labs, UCL) and UnitRefine
     (pretrained classifiers; Jain, Musall and colleagues), combines both into a final good / mua /
     noise label, and writes an NWB Units table with spike times on the session clock, brain area,
@@ -31,6 +32,12 @@ runtime:
     - standard
   timeoutSeconds: 21600
 parameters:
+  - name: AUTO_MERGE
+    type: boolean
+    description: >-
+      Merge over-split units first, with SpikeInterface's implementation of SLAy (template
+      similarity and cross-correlogram significance). Merges are listed in merges.csv.
+    defaultValue: true
   - name: LABEL_RULE
     type: string
     description: >-
@@ -152,15 +159,14 @@ outputs:
       ephys-curate/<session_id>_units.nwb (NWB Units: spike_times in session-clock seconds,
       electrodes / peak_channel, brain_area, waveform_mean, every quality and template metric,
       bombcell_label, unitrefine_label, label, kslabel), units.csv, <session_id>_analyzer.zarr,
-      <session_id>_bombcell/, optional <session_id>_phy/, figures, sessions.csv, summary.json,
+      <session_id>_bombcell/, optional <session_id>_phy/, merges.csv, figures, sessions.csv, summary.json,
       provenance.json.
     mediaTypes:
       - "application/x-hdf5; profile=nwb"
       - text/csv
       - application/json
       - image/png
-    formats:
-      - format_3915
+      - application/vnd.pennsieve.zarr
 
 # How a release is tested before it is made public: the inputs a review run uses.
 # See app-deploy-service docs/app-manifest-review.md. The generator needs only numpy.

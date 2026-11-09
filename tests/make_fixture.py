@@ -13,6 +13,8 @@ brain_area). The sorting has:
   units 0-7   eight ground-truth units, spike times as simulated              -> should be good
   unit  8     ground-truth unit 8 plus 40 % random extra spikes (contaminated) -> should be mua
   units 9-11  random spike times with no spike in the signal                   -> should be noise
+  unit  12    every other spike of ground-truth unit 7 (unit 7 keeps the rest): an over-split
+              unit                                                             -> merged back into 7
 
 The reference (ground truth) is every simulated unit's spike times, as a CSV
 (<session>_groundtruth_spikes.csv: unit_id, spike_time in session seconds); the tests also write
@@ -42,6 +44,7 @@ N_GT = 9
 GOOD_UNITS = list(range(8))
 MUA_UNITS = [8]
 NOISE_UNITS = [9, 10, 11]
+SPLIT_UNIT = (7, 12)        # unit 7 over-split into 7 and 12
 GAIN_UV = 0.195            # uV per bit of the int16 traces (as an Intan/NP2-like gain)
 SI_VERSION = "0.105.4"
 
@@ -242,6 +245,10 @@ def build(duration: float = 60.0, seed: int = 7, engine: str = "auto"):
     for _ in NOISE_UNITS:                    # nothing in the signal: noise clusters
         k = int(rng.uniform(6.0, 10.0) * duration)
         sorted_trains.append(np.unique(rng.integers(200, n - 200, size=k)))
+    a, b = SPLIT_UNIT
+    full = sorted_trains[a]
+    sorted_trains[a] = full[0::2]
+    sorted_trains.append(full[1::2])
     return dict(engine=engine, traces=traces, pos=pos, gt_trains=[np.asarray(t, dtype=np.int64) for t in gt_trains],
                 sorted_trains=sorted_trains, duration=n / FS)
 
@@ -302,7 +309,7 @@ def write(out: Path, layout: str = "both", engine: str = "auto", duration: float
         _dump(sess / "session.json", session_json(sim))
         n_units = len(sim["sorted_trains"])
         if kilosort:
-            labels = ["good"] * len(GOOD_UNITS) + ["mua"] * (n_units - len(GOOD_UNITS))
+            labels = ["good"] * len(GOOD_UNITS) + ["mua"] * (n_units - len(GOOD_UNITS) - 1) + ["good"]
             write_kilosort_folder(sort_root / f"{SESSION_ID}_kilosort4", sim["sorted_trains"], list(range(n_units)),
                                   labels, len(sim["pos"]))
         else:

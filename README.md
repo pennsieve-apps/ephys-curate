@@ -11,7 +11,10 @@ University College London, labels units with interpretable thresholds.
 **[UnitRefine](https://github.com/anoushkajain/UnitRefine)** (Jain et al. 2025,
 [bioRxiv](https://doi.org/10.1101/2025.03.30.645770)), developed by Anoushka Jain, Chris Halcrow,
 Simon Musall and colleagues together with the SpikeInterface team, supplies the pretrained
-classifiers. The demo data are the [International Brain Laboratory](https://www.internationalbrainlab.com)'s
+classifiers. Over-split units are merged first with SpikeInterface's implementation of
+**[SLAy](https://github.com/saikoukunt/SLAy)** (Koukuntla et al. 2025,
+[bioRxiv](https://doi.org/10.1101/2025.06.20.660590)), developed by Sai Koukuntla, Adam Charles
+and colleagues (Johns Hopkins University and HHMI Janelia). The demo data are the [International Brain Laboratory](https://www.internationalbrainlab.com)'s
 Brain Wide Map ([DANDI:000409](https://doi.org/10.48324/dandi.000409/0.260309.1324)) and the
 ground-truth simulation of Laquitaine, Imbeni, Tharayil, Isbister and Reimann (Blue Brain Project,
 EPFL; [DANDI:001250](https://doi.org/10.48324/dandi.001250/0.261108.1908)). **Pennsieve packages
@@ -54,7 +57,15 @@ lazily in 1 s chunks):
    or `read_kilosort` of a Kilosort/Phy folder), matched on `session_id`. The sorting must index
    samples of this recording (same rate, no spikes beyond its end); spikes in the last samples
    are trimmed (`remove_excess_spikes`) and units with fewer than 2 spikes dropped.
-2. **SortingAnalyzer**, sparse (`radius_um=SPARSITY_RADIUS_UM`, 100 µm), with the extensions of
+2. **Auto-merge** (`AUTO_MERGE`, default on): sorters, Kilosort4 among them, split some neurons
+   into two or more units (for instance when the spike amplitude drifts). SpikeInterface's
+   `compute_merge_unit_groups(preset="slay")`, its implementation of SLAy (template similarity plus a
+   cross-correlogram significance score; Koukuntla et al. report that SLAy recovers most of the merges
+   human curators make), runs on a light analyzer (sampled spikes, noise levels, templates); the
+   groups are applied to the sorting (`apply_merges_to_sorting`, spikes closer than 0.3 ms within a
+   merged unit removed as double counts, the merged unit keeps the first unit's id) and recorded in
+   `merges.csv` and the `merged_from` column. Everything below runs on the merged sorting.
+3. **SortingAnalyzer**, sparse (`radius_um=SPARSITY_RADIUS_UM`, 100 µm), with the extensions of
    the AIND ephys pipeline (Buccino et al. 2026): `random_spikes` (`MAX_SPIKES_PER_UNIT`, 500),
    `noise_levels`, `waveforms` (−2/+3 ms), `templates` (mean, std), `spike_amplitudes`,
    `amplitude_scalings`, `unit_locations` (monopolar triangulation), `spike_locations` (grid
@@ -63,34 +74,38 @@ lazily in 1 s chunks):
    `quality_metrics`: num_spikes, firing_rate, presence_ratio, snr, isi_violation, rp_violation,
    sliding_rp_violation, amplitude_cutoff, amplitude_median, amplitude_cv, firing_range, drift,
    sd_ratio, synchrony, noise_cutoff, and with `PCA_METRICS` isolation distance, L-ratio, d′,
-   nearest-neighbour hit/miss rates and silhouette. Presence-ratio bins and drift intervals are
+   nearest-neighbour hit/miss rates and silhouette. The PCA metrics use SpikeInterface's functions
+   and neighbourhoods but are computed one unit at a time over forked workers: SpikeInterface's own
+   `quality_metrics` prepares every unit's PCA neighbourhood at once, which ran out of 4–8 GB of
+   memory on 238 units (the values are identical; `tests/` checks it). They are in `units.csv` and the
+   NWB file, not in the analyzer's `quality_metrics` extension. Presence-ratio bins and drift intervals are
    Bombcell's 60 s, shortened for windows under 10 min so there are at least 10 bins / 5
    intervals.
-3. **Bombcell** (`bombcell.run_bombcell_qc`, which labels with SpikeInterface's
+4. **Bombcell** (`bombcell.run_bombcell_qc`, which labels with SpikeInterface's
    `bombcell_label_units`) with Bombcell's default thresholds (`bombcell_thresholds.json` in the
    output), two changes: the distance metrics (isolation distance, L-ratio) are left out, as
    Bombcell itself does by default for acute recordings; and in windows shorter than 10 minutes the
    minimum spike count (300) becomes 0.5 Hz × duration, because 300 spikes in a 60 s window would
    reject every neuron firing below 5 Hz. `BOMBCELL_THRESHOLDS` overrides any threshold.
-4. **UnitRefine**: the two pretrained classifiers (`SpikeInterface/UnitRefine_noise_neural_classifier`
+5. **UnitRefine**: the two pretrained classifiers (`SpikeInterface/UnitRefine_noise_neural_classifier`
    and `..._sua_mua_classifier`, baked into the image at pinned commits) applied as a cascade, as
    SpikeInterface's `unitrefine_label_units` does, on the analyzer's metrics. Features a model
    needs that were not computed (the PCA metrics with `PCA_METRICS=false`) are passed as missing
    and imputed by the model's own imputer, with a warning.
-5. **Final label** (`LABEL_RULE`, below).
-6. **Times.** Spike times in seconds are the recording's own sample times (`recording.get_times()`:
+6. **Final label** (`LABEL_RULE`, below).
+7. **Times.** Spike times in seconds are the recording's own sample times (`recording.get_times()`:
    ephys-prep's saved timestamps, e.g. IBL's sync-corrected NWB timestamps, or `t_start + n/fs`),
    never re-zeroed. If the saved recording has lost its times (it starts at 0 s while
    session.json says the window starts later), the times are rebuilt linearly from session.json's
    `t_start`/`t_stop`, with a warning.
-7. **Reference / ground truth** (optional): the reference's spikes (NWB Units table, or a CSV),
+8. **Reference / ground truth** (optional): the reference's spikes (NWB Units table, or a CSV),
    restricted to the recording's probe (a `probe_name`/electrode-group column matching session.json)
    and window, are put on the recording's samples through the same times (nearest sample), units
    with fewer than `REFERENCE_MIN_SPIKES` spikes in the window dropped, and compared with
    `compare_two_sorters` (reference sorting) or `compare_sorter_to_ground_truth` (ground truth),
    spikes matching within `MATCH_DELTA_MS`. A unit is matched at agreement ≥ 0.5; a ground-truth
    unit is well detected at accuracy ≥ 0.8.
-8. **Outputs** written, the raw waveform snippets and PCA models deleted from the analyzer
+9. **Outputs** written, the raw waveform snippets and PCA models deleted from the analyzer
    (they are gigabytes, and the PCA models are pickled objects zarr refuses to load), the analyzer
    saved as zarr.
 
@@ -124,6 +139,7 @@ sorting are paired even when their names differ (with a warning).
 
 | Parameter | Type | Default | What it does |
 |---|---|---|---|
+| `AUTO_MERGE` | boolean | `true` | Merge over-split units first (SLAy preset); merges in `merges.csv`. |
 | `LABEL_RULE` | string | `consensus` | `consensus`, `bombcell` or `unitrefine` (see Labels). |
 | `PCA_METRICS` | boolean | `true` | PCA-based metrics (UnitRefine's models were trained with them). The slowest step on large sortings; `false` imputes them for UnitRefine. |
 | `UNITREFINE` | boolean | `true` | Run UnitRefine. |
@@ -146,8 +162,11 @@ logged and skipped.
 | File | Contents |
 |---|---|
 | `<session_id>_units.nwb` | NWB file (session identity, subject and `session_start_time` copied from session.json) with an electrodes table (all channels, `location` = brain area, `rel_x`, `rel_y`) and the **Units** table: `spike_times` (session seconds), `obs_intervals` (the recording's window), `electrodes` (peak channel), `electrode_group`, `waveform_mean` (peak channel, 81 samples centred on the trough, µV), and the columns of `units.csv`. |
-| `units.csv` | One row per unit and session: `session_id, unit_name, peak_channel, brain_area, x, y, z, depth` (µm, monopolar triangulation; depth = position along the probe), `peak_channel_x/y`, every quality metric, every template metric, `bombcell_label, bombcell_reasons` (failed thresholds), `unitrefine_label, unitrefine_probability, unitrefine_noise_probability, label`, `kslabel` (Kilosort input), `reference_match, reference_agreement` (with a reference), `subject_id, condition, group` (from sessions.csv). |
+| `units.csv` | One row per unit and session: `session_id, unit_name, peak_channel, brain_area, x, y, z, depth` (µm, monopolar triangulation; depth = position along the probe), `peak_channel_x/y`, every quality metric, every template metric, `bombcell_label, bombcell_reasons` (failed thresholds), `unitrefine_label, unitrefine_probability, unitrefine_noise_probability, label`, `merged_from` (`7;12` when auto-merge joined units 7 and 12), `kslabel` (Kilosort's own label),
+`reference_match, reference_agreement` and the matched reference unit's own labels as
+`reference_<column>` (IBL: `reference_ibl_quality_score`, `reference_kilosort2_label`) (with a reference), `subject_id, condition, group` (from sessions.csv). |
 | `<session_id>_analyzer.zarr` | The SpikeInterface SortingAnalyzer (templates, metrics, locations, amplitudes, correlograms, ...; without raw waveforms and PCA models). `si.load_sorting_analyzer(path)`; reopen it with the recording to recompute anything. |
+| `merges.csv` | `session_id, unit_name, merged_unit_names, n_units_merged, n_spikes`: one row per merged unit (`AUTO_MERGE=true`). |
 | `<session_id>_bombcell/` | Bombcell's `labeling_results_wide.csv`, `labeling_results_narrow.csv` (pass/fail per metric), `thresholds.json`. |
 | `<session_id>_phy/` | With `EXPORT_PHY=true`. |
 | `<session_id>_reference_units.csv`, `<session_id>_groundtruth_performance.csv` | With a reference: per reference unit the best-matching unit and agreement; for ground truth, accuracy / recall / precision per true unit. |
@@ -163,6 +182,11 @@ RESULTS_PLACEHOLDER
 RUNTIME_PLACEHOLDER
 
 ## Running it locally
+
+The image is Lambda-safe (read-only root, any unprivileged user, writable caches under `$TMPDIR`),
+but the step is sized for standard compute: curating a 10-minute Neuropixels session takes longer
+than Lambda's 15 minutes. Tested with `docker run --read-only --user 65534:65534 --tmpfs /tmp`.
+
 
 ```sh
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -197,7 +221,13 @@ docker run --rm --platform linux/amd64 --network none --memory 16g \
 - The **brain area** is the area of the unit's peak channel as ephys-prep received it (e.g. IBL's
   histology); errors in probe localisation pass through.
 - Agreement with a **reference sorting** measures consistency, not correctness: two sorters can
-  agree on the same mistake. Only a ground truth measures accuracy, and only in simulation.
+  agree on the same mistake. Only a ground truth measures accuracy, and only in simulation. No
+  sorting is perfect even there: in the detailed cortical simulation used here, Laquitaine et al.
+  found that sorters isolate only a small fraction of the neurons near the probe (about 10 %),
+  biased towards large, active neurons; "good" means the unit is likely one neuron, not that
+  every neuron was found.
+- Auto-merge can join two different neurons with similar waveforms on the same channels, and leaves
+  splits it is not sure about; `merges.csv` lists what it did, and `AUTO_MERGE=false` turns it off.
 - The sorting must come from exactly the recording given (same samples). A Kilosort run on the full
   file cannot be curated against a window of it.
 - The analyzer is saved without raw waveform snippets and PCA models; reopen it with the recording
@@ -219,6 +249,12 @@ Bombcell (as its authors ask):
 > Fabre JMJ, Van Beest EH, Peters AJ, Carandini M, Harris KD. **Bombcell: automated curation and
 > cell classification of spike-sorted electrophysiology data.** Zenodo (2023).
 > https://doi.org/10.5281/zenodo.8172821
+
+SLAy (auto-merge):
+
+> Koukuntla S, DeWeese T, Cheng A, Mildren R, Lawrence A, Graves AR, Cullen KE, Colonell J,
+> Harris TD, Charles AS. **SLAy-ing oversplitting errors in high-density electrophysiology spike
+> sorting.** bioRxiv (2025). https://doi.org/10.1101/2025.06.20.660590, PMID 40666932.
 
 UnitRefine (as its authors ask), and its pretrained models:
 

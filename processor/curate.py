@@ -87,6 +87,43 @@ def session_thresholds(thresholds: dict, duration_s: float, overrides: dict) -> 
     return thr, ""
 
 
+def auto_merge(sorting, recording, p: dict) -> tuple:
+    """Merge over-split units with SpikeInterface's SLAy preset (Koukuntla et al. 2025).
+
+    A light in-memory analyzer (sampled spikes, noise levels, templates; the preset computes the
+    correlograms and template similarity it needs) proposes groups of units to merge; the groups are
+    applied to the sorting, with spikes closer than 0.3 ms within a merged unit removed (the same
+    unit counted twice). Merged units keep the id of the group's first unit.
+    Returns (sorting, [(new_unit_id, [merged unit ids]), ...]).
+    """
+    import spikeinterface.full as si
+    from spikeinterface.curation import compute_merge_unit_groups
+
+    pre = si.create_sorting_analyzer(sorting, recording, format="memory", sparse=True, method="radius",
+                                     radius_um=p["SPARSITY_RADIUS_UM"], return_in_uV=True)
+    pre.compute({"random_spikes": dict(method="uniform", max_spikes_per_unit=p["MAX_SPIKES_PER_UNIT"],
+                                       seed=p["SEED"]),
+                 "noise_levels": dict(random_slices_kwargs=dict(seed=p["SEED"])),
+                 "templates": dict(ms_before=2.0, ms_after=3.0)})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        groups = compute_merge_unit_groups(pre, preset="slay", resolve_graph=True, force_copy=False)
+    groups = [list(g) for g in groups if len(g) > 1]
+    del pre
+    if not groups:
+        return sorting, []
+    merged = si.apply_merges_to_sorting(sorting, groups, censor_ms=0.3, new_id_strategy="take_first")
+    out = [(g[0], g) for g in groups]
+    # properties of the first unit of each group (e.g. KSLabel) carry over
+    for key in sorting.get_property_keys():
+        try:
+            vals = dict(zip(sorting.unit_ids, sorting.get_property(key)))
+            merged.set_property(key, np.array([vals.get(u) for u in merged.unit_ids]))
+        except Exception:   # noqa: BLE001 - a property that cannot be carried is dropped
+            pass
+    return merged, out
+
+
 def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float):
     import spikeinterface.full as si
 
@@ -139,52 +176,81 @@ def _rss_mb() -> int | None:
     return None
 
 
-def pca_metrics(analyzer, max_spikes_nn: int = 10000, n_neighbors: int = 5, seed: int = 42) -> pd.DataFrame:
+_PCA_STATE: dict = {}
+
+
+def _pca_one_unit(u):
+    """PCA metrics of one unit (the analyzer is inherited from the parent process, see pca_metrics)."""
+    from spikeinterface.metrics.quality.pca_metrics import (
+        d_prime_metric, mahalanobis_metrics, nearest_neighbors_metrics, simplified_silhouette_score)
+
+    st = _PCA_STATE
+    analyzer, main, unit_ids = st["analyzer"], st["main"], st["unit_ids"]
+    if analyzer.is_sparse():
+        chans = analyzer.sparsity.unit_id_to_channel_ids[u]
+        neigh = [o for o in unit_ids if main[o] in chans]
+    else:
+        chans, neigh = analyzer.channel_ids, unit_ids
+    proj, idx = st["pca_ext"].get_some_projections(channel_ids=chans, unit_ids=neigh)
+    labels = analyzer.sorting.unit_ids[idx]
+    pcs = proj.reshape(proj.shape[0], -1)
+    np.random.seed(st["seed"])
+    r = {}
+    for names, fn in ((("isolation_distance", "l_ratio"), lambda: mahalanobis_metrics(pcs, labels, u)),
+                      (("d_prime",), lambda: (d_prime_metric(pcs, labels, u) if len(neigh) > 1 else np.nan,)),
+                      (("nn_hit_rate", "nn_miss_rate"),
+                       lambda: nearest_neighbors_metrics(pcs, labels, u, st["max_spikes_nn"], st["n_neighbors"])),
+                      (("silhouette",), lambda: (simplified_silhouette_score(pcs, labels, u),))):
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                vals = fn()
+        except Exception:   # noqa: BLE001 - as SpikeInterface: a metric that fails is NaN
+            vals = (np.nan,) * len(names)
+        r.update(dict(zip(names, (float(v) for v in vals))))
+    return u, r, len(neigh), pcs.shape
+
+
+def pca_metrics(analyzer, max_spikes_nn: int = 10000, n_neighbors: int = 5, seed: int = 42,
+                n_jobs: int = 1) -> pd.DataFrame:
     """isolation_distance, l_ratio, d_prime, nn_hit_rate, nn_miss_rate, silhouette (simplified) per unit.
 
     The same functions and the same neighbourhood as SpikeInterface's quality_metrics (units whose
     main channel lies within the unit's sparsity channels, projections on those channels), but
-    computed one unit at a time so memory stays at one neighbourhood.
+    computed one unit at a time, so memory stays at one neighbourhood per worker (SpikeInterface
+    prepares every unit's neighbourhood at once: several GB for a few hundred units). With n_jobs > 1
+    on Linux, units are spread over forked worker processes.
     """
+    import multiprocessing as mp
+    import sys
     import time
+    from concurrent.futures import ProcessPoolExecutor
 
-    from spikeinterface.metrics.quality.pca_metrics import (
-        d_prime_metric, mahalanobis_metrics, nearest_neighbors_metrics, simplified_silhouette_score)
-
-    np.random.seed(seed)
-    pca_ext = analyzer.get_extension("principal_components")
     unit_ids = list(analyzer.unit_ids)
-    main = analyzer.get_main_channels(outputs="id", with_dict=True)
+    _PCA_STATE.update(analyzer=analyzer, main=analyzer.get_main_channels(outputs="id", with_dict=True),
+                      unit_ids=unit_ids, pca_ext=analyzer.get_extension("principal_components"), seed=seed,
+                      max_spikes_nn=max_spikes_nn, n_neighbors=n_neighbors)
     rows = {}
     t_last = time.monotonic()
-    for k, u in enumerate(unit_ids):
-        if analyzer.is_sparse():
-            chans = analyzer.sparsity.unit_id_to_channel_ids[u]
-            neigh = [o for o in unit_ids if main[o] in chans]
+
+    def collect(results):
+        nonlocal t_last
+        for k, (u, r, n_neigh, shape) in enumerate(results):
+            rows[u] = r
+            if time.monotonic() - t_last > 60 or k < 2:
+                log.info("  PCA metrics: %d / %d units (%d neighbour units, %d x %d features, RSS %s MB)", k + 1,
+                         len(unit_ids), n_neigh, shape[0], shape[1], _rss_mb())
+                t_last = time.monotonic()
+
+    try:
+        if n_jobs > 1 and sys.platform.startswith("linux") and len(unit_ids) > 1:
+            with ProcessPoolExecutor(max_workers=n_jobs, mp_context=mp.get_context("fork")) as ex:
+                collect(ex.map(_pca_one_unit, unit_ids, chunksize=4))
         else:
-            chans, neigh = analyzer.channel_ids, unit_ids
-        proj, idx = pca_ext.get_some_projections(channel_ids=chans, unit_ids=neigh)
-        labels = analyzer.sorting.unit_ids[idx]
-        pcs = proj.reshape(proj.shape[0], -1)
-        r = {}
-        for names, fn in ((("isolation_distance", "l_ratio"), lambda: mahalanobis_metrics(pcs, labels, u)),
-                          (("d_prime",), lambda: (d_prime_metric(pcs, labels, u) if len(neigh) > 1 else np.nan,)),
-                          (("nn_hit_rate", "nn_miss_rate"),
-                           lambda: nearest_neighbors_metrics(pcs, labels, u, max_spikes_nn, n_neighbors)),
-                          (("silhouette",), lambda: (simplified_silhouette_score(pcs, labels, u),))):
-            try:
-                vals = fn()
-            except Exception:   # noqa: BLE001 - as SpikeInterface: a metric that fails is NaN
-                vals = (np.nan,) * len(names)
-            r.update(dict(zip(names, (float(v) for v in vals))))
-        rows[u] = r
-        n_feat = pcs.shape[1]
-        del proj, pcs
-        if time.monotonic() - t_last > 60 or k < 3:
-            log.info("  PCA metrics: %d / %d units (%d neighbour units, %d x %d features, RSS %s MB)", k + 1,
-                     len(unit_ids), len(neigh), len(labels), n_feat, _rss_mb())
-            t_last = time.monotonic()
-    return pd.DataFrame.from_dict(rows, orient="index")
+            collect(map(_pca_one_unit, unit_ids))
+    finally:
+        _PCA_STATE.clear()
+    return pd.DataFrame.from_dict(rows, orient="index").reindex(unit_ids)
 
 
 def run_bombcell(analyzer, thresholds: dict, win: dict, out_folder: Path | None, threads: int) -> pd.DataFrame:

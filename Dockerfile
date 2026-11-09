@@ -18,20 +18,21 @@ RUN python /processor/scripts/fetch_models.py /opt/unitrefine && rm -rf /root/.c
 COPY processor/ /processor/processor/
 COPY VERSION LICENSE THIRD_PARTY.md /processor/
 
+# Read-only paths only: on Lambda the image's /tmp and HOME are not there, and the app runs as an
+# arbitrary unprivileged user. Writable caches (matplotlib, numba, pynwb) are put under $TMPDIR at
+# startup (processor/main.py).
 ENV PYTHONPATH="/processor" \
     PYTHONUNBUFFERED=1 \
-    HOME=/tmp \
+    USER=app \
     MPLBACKEND=Agg \
-    MPLCONFIGDIR=/tmp/matplotlib \
-    NUMBA_CACHE_DIR=/tmp/numba \
-    XDG_CACHE_HOME=/tmp/cache \
     HF_HUB_OFFLINE=1 \
     UNITREFINE_MODELS_DIR=/opt/unitrefine
 
-# A passwd entry for uid 1000 (getpass), the font cache built as that user, and an import check.
-RUN echo "app:x:1000:1000:app:/tmp:/usr/sbin/nologin" >> /etc/passwd \
-    && mkdir -p /tmp/matplotlib /tmp/numba /tmp/cache && chmod 1777 /tmp && chmod -R a+rwX /tmp/matplotlib /tmp/numba /tmp/cache
+# A passwd entry for uid 1000 (getpass) and an import check (caches in a throw-away dir).
+RUN echo "app:x:1000:1000:app:/tmp:/usr/sbin/nologin" >> /etc/passwd
 USER 1000
-RUN python -c "import matplotlib.pyplot, spikeinterface.full, bombcell, pynwb, skops.io, sklearn; from processor import main"
+RUN d=$(mktemp -d) && MPLCONFIGDIR=$d XDG_CACHE_HOME=$d NUMBA_CACHE_DIR=$d HOME=$d \
+    python -c "import matplotlib.pyplot, spikeinterface.full, bombcell, pynwb, skops.io, sklearn; from processor import main" \
+    && rm -rf $d
 
 ENTRYPOINT ["python3", "-m", "processor.entry"]

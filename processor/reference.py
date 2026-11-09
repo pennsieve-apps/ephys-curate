@@ -26,6 +26,7 @@ GT_WORDS = ("ground truth", "ground-truth", "groundtruth", "simulated", "simulat
 MATCH_THRESHOLD = 0.5
 WELL_DETECTED = 0.8
 # Columns of a reference Units table that say which probe a unit is on (IBL: probe00 / probe01).
+LABEL_COLUMNS = ("label", "quality", "ibl_quality_score", "kilosort2_label", "KSLabel", "group")
 PROBE_COLUMNS = ("probe", "probe_name", "probe_label", "pname", "electrode_group_name")
 
 
@@ -97,6 +98,14 @@ def read_reference_nwb(path: Path, probe_hint: str | None = None) -> tuple[dict,
                             info["probe_filter"] = f"electrode_group ~ {probe_hint}"
                     except Exception:   # noqa: BLE001 - a hint only
                         pass
+        # per-unit labels of the reference (IBL: ibl_quality_score, kilosort2_label), carried to matched units
+        labels = {}
+        for c in LABEL_COLUMNS:
+            if c in u and u[c].shape == ids.shape and u[c].ndim == 1:
+                vals = u[c][:]
+                labels[c] = {names[i]: (_decode(v) if isinstance(v, bytes) else (v.item() if hasattr(v, "item") else v))
+                             for i, v in enumerate(vals) if keep[i]}
+        info["_unit_labels"] = labels
         trains = {}
         start = 0
         for i, end in enumerate(idx):
