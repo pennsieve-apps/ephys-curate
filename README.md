@@ -162,7 +162,7 @@ logged and skipped.
 
 | File | Contents |
 |---|---|
-| `<session_id>_units.nwb` | NWB file (session identity, subject and `session_start_time` copied from session.json) with an electrodes table (all channels, `location` = brain area, `rel_x`, `rel_y`) and the **Units** table: `spike_times` (session seconds), `obs_intervals` (the recording's window), `electrodes` (peak channel), `electrode_group`, `waveform_mean` (peak channel, 81 samples centred on the trough, µV), and the columns of `units.csv`. |
+| `<session_id>_units.nwb` | NWB file with a new UUID `identifier` (the source file and its identifier are named in `notes`; `session_start_time`, `timestamps_reference_time`, `session_description`, subject and any experimenter / institution / lab / keywords copied from session.json), checked with nwb-inspect: no schema errors, DANDI-ready, with an electrodes table (all channels, `location` = brain area, `rel_x`, `rel_y`) and the **Units** table: `spike_times` (session seconds), `obs_intervals` (the recording's window), `electrodes` (peak channel), `electrode_group`, `waveform_mean` (peak channel, 81 samples centred on the trough, µV), and the columns of `units.csv`. |
 | `units.csv` | One row per unit and session: `session_id, unit_name, peak_channel, brain_area, x, y, z, depth` (µm, monopolar triangulation; depth = position along the probe), `peak_channel_x/y`, every quality metric, every template metric, `bombcell_label, bombcell_reasons` (failed thresholds), `unitrefine_label, unitrefine_probability, unitrefine_noise_probability, label`, `merged_from` (`7;12` when auto-merge joined units 7 and 12), `kslabel` (Kilosort's own label),
 `reference_match, reference_agreement` and the matched reference unit's own labels as
 `reference_<column>` (IBL: `reference_ibl_quality_score`, `reference_kilosort2_label`) (with a reference), `subject_id, condition, group` (from sessions.csv). |
@@ -176,11 +176,56 @@ logged and skipped.
 
 ## Results on the demo data
 
-RESULTS_PLACEHOLDER
+All runs with the defaults. The upstream steps were stand-ins (SpikeInterface high-pass 300 Hz +
+common median reference, sorted with SpikeInterface's CPU sorter Lupin), because ephys-prep and
+spike-sort had not finished the demo data yet; the numbers will change with Kilosort4.
+
+**IBL, `sub-NR-0031_ses-caa5dddc`, Probe01, 120 s (1000–1120 s on the session clock), 384
+channels.** Lupin found 450 units; auto-merge joined one pair (450 → 449). Bombcell: 28 good, 333
+mua, 72 noise, 16 non-somatic; UnitRefine: 135 sua, 202 mua, 112 noise; the two agree on 62 % of
+units, and every Bombcell-good unit is UnitRefine-sua. Final labels: **28 good, 302 mua, 119
+noise** (median SNR of good units 7.0, median rate 16.5 Hz). Good units sit in the midbrain
+reticular nucleus (9), anterior pretectal nucleus (8), CA1 (7) and dentate gyrus (3); the visual
+cortex layers and fibre tracts at the top of the probe yield only mua and noise. Compared with
+IBL's own sorting of the same probe (iblsorter, a Kilosort 2.5 port; 443 units with spikes in the
+window, spikes matched within 0.4 ms on the same clock): **27 of our 28 good units match an IBL
+unit** (median agreement 0.99; 21 of them IBL-good), 128 of 302 mua, and only 7 of 119 noise
+units; 51 of the 61 IBL-good units in the window are recovered. Spike times come out on IBL's
+clock (1000.000–1120.000 s, from the NWB timestamps).
+
+**Ground truth, DANDI:001250 `sub-demo-npx-bio-evoked`** (60 s, 120 channels, 20 kHz; 788 simulated
+neurons with ≥ 10 spikes). Lupin found 238 units (no merges). 54 of them match a true neuron
+(agreement ≥ 0.5) and **38 true neurons are well detected (accuracy ≥ 0.8), 4.8 % of the 788**,
+in line with Laquitaine et al.'s finding that sorters isolate only a small fraction of the neurons
+near the probe. Curation does poorly here: Bombcell called none good (most simulated spikes are
+below its 30 µV amplitude threshold, and 60 s is too short for the refractory test), UnitRefine
+called 194 of 238 units noise (it was trained on real Neuropixels data, not on this simulation),
+so the final labels are 0 good, 43 mua, 195 noise, and 39 of the 54 units that do match a true
+neuron are labelled noise. Use simulation results to evaluate sorters, not these classifiers.
+
+**Synthetic fixture** (`tests/make_fixture.py`, 60 s, 32 channels): the 8 planted good units are
+`good`, the contaminated unit `mua`, the 3 noise clusters `noise`, the over-split unit is merged back
+(7 + 12 → 7), and the 8 good units match their ground truth with accuracy 1.0.
 
 ## Runtime
 
-RUNTIME_PLACEHOLDER
+`computeTypes: [standard]`, 4 vCPU / 16 GiB, 6 h timeout (not Lambda-sized: a 10-minute probe
+takes longer than 15 minutes).
+
+| Data | Units | Where | Wall time | Peak memory |
+|---|---|---|---|---|
+| IBL Probe01, 120 s, 384 ch | 450 → 449 | native arm64 macOS, 1 process (`THREADS=1`) | 851 s (auto-merge 58 s, spike locations 178 s, PCA 116 s, PCA metrics 345 s) | 2.8 GB RSS |
+| Ground truth, 60 s, 120 ch | 238 | Docker linux/amd64 under emulation on an M-series Mac, `--cpus 4 --memory 4g` | 984 s (PCA 384 s, PCA metrics 188 s) | 2.0 GB (cgroup `memory.peak`) |
+| Synthetic fixture, 60 s, 32 ch | 13 → 12 | Docker linux/amd64 (emulated), `--read-only --user 65534:65534 --tmpfs /tmp`, 4 CPUs | 225 s | 0.75 GB RSS |
+
+The 120 s IBL window was not run in Docker: the local Docker VM has 7.7 GB shared with other
+builders, and two attempts were killed by the VM's OOM killer (not by the container limit) while
+other containers were running. Peak memory grows with the number of units (templates, PCA
+projections of 500 spikes per unit) more than with duration; scratch disk (`$TMPDIR`) holds the
+raw waveform snippets, about units × 500 × 150 samples × ~40 channels × 4 bytes (≈ 5 GB for 450
+units), deleted at the end. For a 10-minute probe with 400–600 units expect 30–60 minutes on 4
+vCPUs and 4–6 GB of memory (est.); 16 GiB leaves room for 1,000+ units. The PCA step and PCA
+metrics dominate; `PCA_METRICS=false` removes both. Image: 1.63 GB.
 
 ## Running it locally
 
@@ -210,7 +255,7 @@ docker run --rm --platform linux/amd64 --network none --memory 16g \
 - **Automated labels are opinions, not truth.** Bombcell's thresholds and UnitRefine's training
   labels encode particular labs' judgement on particular probes (UnitRefine: Neuropixels 1.0 in
   mouse V1, SC and ALM). On other probes, species, brain regions or simulated data they can be
-  systematically off (on the ground-truth simulation UnitRefine calls most units noise; see
+  systematically off (on the ground-truth simulation UnitRefine calls 194 of 238 units noise; see
   Results). Look at the gallery and metric figures, and check a sample of units by eye before you
   trust the counts.
 - **Short windows bias the metrics.** Presence ratio, drift and refractory-period contamination

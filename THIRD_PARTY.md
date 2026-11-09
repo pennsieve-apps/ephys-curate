@@ -29,6 +29,9 @@ Licences were read from each installed package's metadata (`importlib.metadata`)
 environment resolved from `requirements.txt`, and from Bombcell's and UnitRefine's repositories.
 
 ## Not bundled
+- **SLAy** (Sai Koukuntla, Adam Charles and colleagues; https://github.com/saikoukunt/SLAy): the
+  auto-merge uses SpikeInterface's own (MIT) implementation of SLAy's score (`preset="slay"`); the
+  original package is not in the image.
 
 - **Kilosort4** (GPL-3.0; Pachitariu, Sridhar, Pennington and Stringer, HHMI Janelia) is not in
   the image. This app reads Kilosort's output files (`spike_times.npy`, `spike_clusters.npy`,

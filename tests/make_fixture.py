@@ -262,7 +262,8 @@ def session_json(sim) -> dict:
         "n_channels": n_ch, "bad_channels": [], "motion_corrected": False, "motion_method": None,
         "time_source": "t_start", "session_start_time": "2026-11-09T09:00:00+00:00",
         "identifier": "synthetic-a1b2c3d4", "session_description": "synthetic ground-truth session",
-        "subject": {"subject_id": "synth01", "species": "Mus musculus", "sex": "U"},
+        "subject": {"subject_id": "synth01", "species": "Mus musculus", "sex": "U", "age": "P90D",
+                    "description": "synthetic"},
     }
 
 

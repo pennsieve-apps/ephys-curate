@@ -144,7 +144,8 @@ def test_nwb_units_session_clock(default_run, sim):
     with NWBHDF5IO(str(default_run / f"{SID}_units.nwb"), "r") as io:
         nwb = io.read()
         df = nwb.units.to_dataframe()
-        assert nwb.identifier == "synthetic-a1b2c3d4"
+        assert nwb.identifier != "synthetic-a1b2c3d4" and len(nwb.identifier) == 36   # a new UUID
+        assert "synthetic-a1b2c3d4" in nwb.notes
         assert nwb.subject.subject_id == "synth01"
         for c in ("spike_times", "label", "bombcell_label", "unitrefine_label", "brain_area", "peak_channel",
                   "waveform_mean", "snr", "presence_ratio", "electrodes", "obs_intervals"):

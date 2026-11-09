@@ -3,7 +3,7 @@ The session's NWB file with the Units table.
 
 spike_times are seconds on the session clock: the recording's own times (its t_start, or its
 timestamps when ephys-prep kept them), never re-zeroed. The file copies session_start_time,
-identifier, session_description, subject and timestamps_reference_time from session.json (which
+session_description, subject and timestamps_reference_time from session.json (which
 ephys-prep copies from the source NWB), so it lines up with the session's other NWB files.
 """
 from __future__ import annotations
@@ -58,19 +58,34 @@ def write_units_nwb(path: Path, session_id: str, session: dict, recording, table
     if start is None:
         start = datetime(1970, 1, 1, tzinfo=timezone.utc)
         notes["session_start_time"] = "unknown (no source NWB): 1970-01-01T00:00:00Z; times are seconds of the recording"
-    ident = session.get("identifier") or f"{session_id}-{uuid.uuid4()}"
-    nwb = NWBFile(
+    src = session.get("source") or "the recording"
+    notes_text = (f"derived from {Path(str(src)).name} (identifier {session.get('identifier') or 'unknown'}) by "
+                  f"ephys-curate {app_version}: units curated with a SpikeInterface SortingAnalyzer, Bombcell and "
+                  "UnitRefine.")
+    kw = dict(
         session_description=session.get("session_description") or f"{session_id}: curated spike-sorted units",
-        identifier=str(ident), session_start_time=start,
+        identifier=str(uuid.uuid4()), session_start_time=start,
         timestamps_reference_time=_dt(session.get("timestamps_reference_time"), start),
-        session_id=session_id,
+        session_id=str(session.get("nwb_session_id") or session_id),
         source_script=f"ephys-curate {app_version}", source_script_file_name="ephys-curate",
-        notes="Units curated by ephys-curate (SpikeInterface SortingAnalyzer, Bombcell, UnitRefine).",
+        notes=notes_text,
     )
+    for k in ("experimenter", "institution", "lab", "keywords", "experiment_description"):
+        v = session.get(k)
+        if v not in (None, "", []):
+            kw[k] = list(v) if k in ("experimenter", "keywords") and isinstance(v, (list, tuple)) else (
+                [v] if k in ("experimenter", "keywords") else str(v))
+    kw.setdefault("keywords", ["electrophysiology", "spike sorting", "curation", "units"])
+    nwb = NWBFile(**kw)
     subj = session.get("subject") or {}
     if isinstance(subj, dict) and (subj or (sheet_row or {}).get("subject_id")):
-        kw = {k: subj[k] for k in ("subject_id", "species", "sex", "age", "description", "genotype", "strain")
+        kw = {k: subj[k] for k in ("subject_id", "species", "sex", "age", "description", "genotype", "strain",
+                                   "weight")
               if subj.get(k) not in (None, "")}
+        if subj.get("date_of_birth"):
+            dob = _dt(subj["date_of_birth"])
+            if dob is not None:
+                kw["date_of_birth"] = dob
         if "subject_id" not in kw and (sheet_row or {}).get("subject_id"):
             kw["subject_id"] = str(sheet_row["subject_id"])
         if kw.get("sex") not in (None, "M", "F", "U", "O"):
@@ -83,7 +98,7 @@ def write_units_nwb(path: Path, session_id: str, session: dict, recording, table
     probe = session.get("probe") or {}
     device = nwb.create_device(name=str(probe.get("model") or "probe"),
                                description=f"serial {probe.get('serial', '')}".strip(),
-                               manufacturer=str(probe.get("manufacturer", "")))
+                               manufacturer=str(probe["manufacturer"]) if probe.get("manufacturer") else None)
     group = nwb.create_electrode_group(name=str(session.get("stream") or "probe"),
                                        description="recording channels (after ephys-prep)",
                                        location="see electrodes.location", device=device)
@@ -104,7 +119,8 @@ def write_units_nwb(path: Path, session_id: str, session: dict, recording, table
         description=("Units curated by ephys-curate. spike_times in seconds on the session clock; "
                      "waveform_mean: mean waveform on the peak channel, 81 samples centred on the trough, uV; "
                      "label = final good/mua/noise"),
-        waveform_rate=float(recording.sampling_frequency), waveform_unit="microvolts")
+        waveform_rate=float(recording.sampling_frequency), waveform_unit="microvolts",
+        resolution=1.0 / float(recording.sampling_frequency))
     cols = [c for c in table.columns if c not in SKIP]
     for c in cols:
         nwb.add_unit_column(c if c != "unit_id" else "unit_name", DESCRIPTIONS.get(c, f"{c} (SpikeInterface metric)"))

@@ -69,7 +69,10 @@ def unit_yield(sid: str, table: pd.DataFrame, path: Path) -> Path:
     ax.set_xlabel("units")
     ax.set_title("Units per brain region (deepest at the bottom)")
     tot = t["label"].value_counts().reindex(LABELS, fill_value=0)
-    _legend(ax, counts=tot, loc="lower right")
+    from matplotlib.patches import Patch
+
+    ax.legend(handles=[Patch(color=LABEL_COLOURS[l], label=f"{l} ({tot[l]})") for l in LABELS], ncol=3,
+              loc="upper center", bbox_to_anchor=(0.5, -0.12 if len(counts) > 3 else -0.25), fontsize=8)
     ax.set_xlim(0, max(left.max() * 1.15, 1))
     if has_both:
         ax2 = axes[1]
