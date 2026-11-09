@@ -217,3 +217,35 @@ def test_streaming_pca_metrics_match_spikeinterface(fixture_dir):
     mine = C.pca_metrics(a, seed=42)
     for c in mine.columns:
         assert np.allclose(ref[c].to_numpy(float), mine[c].to_numpy(float), equal_nan=True, rtol=1e-4), c
+
+
+def test_non_nominal_time_vector(tmp_path, monkeypatch, sim):
+    """Spike times come from the recording's time vector (e.g. IBL's sync-corrected timestamps at an
+    effective rate != the nominal one), never t0 + n / fs; the reference is matched on that clock."""
+    import shutil as _sh
+
+    FX.write(tmp_path / "fx", "linked", sim=sim)
+    base = tmp_path / "fx" / "linked"
+    n = sim["traces"].shape[0]
+    tv = 600.0 + np.arange(n) / (FX.FS * 1.001)          # 0.1 % faster clock: 60 ms off after 60 s
+    np.save(base / "recording" / "ephys-prep" / SID / "recording" / "times_cached_seg0.npy", tv)
+    ref = base / "reference" / f"{SID}_groundtruth_spikes.csv"
+    with open(ref, "w") as fh:
+        fh.write("unit_id,spike_time\n")
+        for u, tr in enumerate(sim["gt_trains"]):
+            for f in tr:
+                fh.write(f"gt{u},{tv[f]:.7f}\n")
+    out = tmp_path / "out"
+    assert run(monkeypatch, base, out, AUTO_MERGE="false", PCA_METRICS="false", UNITREFINE="false",
+               GALLERY_UNITS=0) == 0
+    from pynwb import NWBHDF5IO
+
+    with NWBHDF5IO(str(out / "ephys-curate" / f"{SID}_units.nwb"), "r") as io:
+        df = io.read().units.to_dataframe()
+    st = df.loc[0, "spike_times"]
+    assert np.allclose(st, tv[sim["gt_trains"][0]])
+    assert not np.allclose(st, 600.0 + sim["gt_trains"][0] / FX.FS, atol=1e-3)
+    s = json.loads((out / "ephys-curate" / "summary.json").read_text())["sessions"][SID]
+    assert s["time_source"] == "recording timestamps"
+    assert s["reference"]["n_well_detected"] >= 7       # 7 of the 8 good (unit 7 stays split: no auto-merge)
+    _sh.rmtree(tmp_path / "fx")

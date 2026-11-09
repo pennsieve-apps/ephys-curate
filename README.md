@@ -96,7 +96,9 @@ lazily in 1 s chunks):
 6. **Final label** (`LABEL_RULE`, below).
 7. **Times.** Spike times in seconds are the recording's own sample times (`recording.get_times()`:
    ephys-prep's saved timestamps, e.g. IBL's sync-corrected NWB timestamps, or `t_start + n/fs`),
-   never re-zeroed. If the saved recording has lost its times (it starts at 0 s while
+   never re-zeroed, and never `t0 + n / fs` when a time vector exists (IBL's effective rate is
+   30,000.48 Hz against a nominal 29,997.0 Hz: 70 ms apart after 10 minutes; `tests/` checks a
+   non-nominal clock). If the saved recording has lost its times (it starts at 0 s while
    session.json says the window starts later), the times are rebuilt linearly from session.json's
    `t_start`/`t_stop`, with a warning.
 8. **Reference / ground truth** (optional): the reference's spikes (NWB Units table, or a CSV),
@@ -176,22 +178,25 @@ logged and skipped.
 
 ## Results on the demo data
 
-All runs with the defaults. The upstream steps were stand-ins (SpikeInterface high-pass 300 Hz +
-common median reference, sorted with SpikeInterface's CPU sorter Lupin), because ephys-prep and
-spike-sort had not finished the demo data yet; the numbers will change with Kilosort4.
+All runs with the defaults.
 
-**IBL, `sub-NR-0031_ses-caa5dddc`, Probe01, 120 s (1000–1120 s on the session clock), 384
-channels.** Lupin found 450 units; auto-merge joined one pair (450 → 449). Bombcell: 28 good, 333
-mua, 72 noise, 16 non-somatic; UnitRefine: 135 sua, 202 mua, 112 noise; the two agree on 62 % of
-units, and every Bombcell-good unit is UnitRefine-sua. Final labels: **28 good, 302 mua, 119
-noise** (median SNR of good units 7.0, median rate 16.5 Hz). Good units sit in the midbrain
-reticular nucleus (9), anterior pretectal nucleus (8), CA1 (7) and dentate gyrus (3); the visual
-cortex layers and fibre tracts at the top of the probe yield only mua and noise. Compared with
-IBL's own sorting of the same probe (iblsorter, a Kilosort 2.5 port; 443 units with spikes in the
-window, spikes matched within 0.4 ms on the same clock): **27 of our 28 good units match an IBL
-unit** (median agreement 0.99; 21 of them IBL-good), 128 of 302 mua, and only 7 of 119 noise
-units; 51 of the 61 IBL-good units in the window are recovered. Spike times come out on IBL's
-clock (1000.000–1120.000 s, from the NWB timestamps).
+**IBL, `sub-NR-0031_ses-caa5dddc`, Probe01, the 10-minute demo window (899.67–1499.67 s on the
+session clock), 383 channels**, from the workflow's own upstream steps: ephys-prep (NWB timestamps
+kept, one dead channel removed) and spike-sort with SpikeInterface's CPU sorter Lupin (686 units;
+Kilosort4 numbers to follow from the GPU node). One unit had fewer than 2 spikes and was dropped;
+auto-merge joined two pairs (685 → 683). Bombcell: 42 good, 457 mua, 166 noise, 18 non-somatic;
+UnitRefine: 192 sua, 314 mua, 177 noise; the two agree on 72 % of units. Final labels: **40 good,
+460 mua, 183 noise** (good units: median SNR 7.0, median rate 12.3 Hz), in the anterior pretectal
+nucleus (12), midbrain reticular nucleus (12), CA1 (11), dentate gyrus (3) and thalamus (2); the
+visual-cortex layers and fibre tracts at the top of the probe give mua and noise only. Against
+IBL's own sorting of the same probe and window (iblsorter, IBL's port of Kilosort 2.5; 534 units
+with ≥ 10 spikes in the window; spikes matched within 0.4 ms on the same clock): **38 of our 40
+good units match an IBL unit** (median agreement 0.96; 26 of the 38 are IBL-good), 129 of 460 mua
+and 12 of 183 noise units do; **59 of the 70 IBL-good units are recovered**. Agreement measures
+consistency between two sorters, not correctness. Output: `data/work/ibl/ephys-curate/`.
+
+An earlier test on a 120 s cut of the same probe (1000–1120 s; our own stand-in preprocessing and
+Lupin sort, 450 units) gave 28 good / 302 mua / 119 noise, 27 of the 28 good units matching IBL.
 
 **Ground truth, DANDI:001250 `sub-demo-npx-bio-evoked`** (60 s, 120 channels, 20 kHz; 788 simulated
 neurons with ≥ 10 spikes). Lupin found 238 units (no merges). 54 of them match a true neuron
@@ -214,17 +219,18 @@ takes longer than 15 minutes).
 
 | Data | Units | Where | Wall time | Peak memory |
 |---|---|---|---|---|
+| IBL Probe01, 600 s, 383 ch (demo window) | 685 → 683 | native arm64 macOS, 1 process (`THREADS=1`) | 1,282 s (auto-merge 65 s, amplitude scalings 167 s, PCA 111 s, PCA metrics 381 s) | 5.2 GB RSS |
 | IBL Probe01, 120 s, 384 ch | 450 → 449 | native arm64 macOS, 1 process (`THREADS=1`) | 851 s (auto-merge 58 s, spike locations 178 s, PCA 116 s, PCA metrics 345 s) | 2.8 GB RSS |
 | Ground truth, 60 s, 120 ch | 238 | Docker linux/amd64 under emulation on an M-series Mac, `--cpus 4 --memory 4g` | 984 s (PCA 384 s, PCA metrics 188 s) | 2.0 GB (cgroup `memory.peak`) |
 | Synthetic fixture, 60 s, 32 ch | 13 → 12 | Docker linux/amd64 (emulated), `--read-only --user 65534:65534 --tmpfs /tmp`, 4 CPUs | 225 s | 0.75 GB RSS |
 
-The 120 s IBL window was not run in Docker: the local Docker VM has 7.7 GB shared with other
+The IBL windows were not run in Docker: the local Docker VM has 7.7 GB shared with other
 builders, and two attempts were killed by the VM's OOM killer (not by the container limit) while
 other containers were running. Peak memory grows with the number of units (templates, PCA
 projections of 500 spikes per unit) more than with duration; scratch disk (`$TMPDIR`) holds the
 raw waveform snippets, about units × 500 × 150 samples × ~40 channels × 4 bytes (≈ 5 GB for 450
-units), deleted at the end. For a 10-minute probe with 400–600 units expect 30–60 minutes on 4
-vCPUs and 4–6 GB of memory (est.); 16 GiB leaves room for 1,000+ units. The PCA step and PCA
+units), deleted at the end. A 10-minute probe with ~700 units took 21 minutes in one process with a 5.2 GB peak; 16 GiB leaves
+room for 1,000+ units or longer recordings, and 4 vCPUs parallelise the chunked steps on Linux. The PCA step and PCA
 metrics dominate; `PCA_METRICS=false` removes both. Image: 1.63 GB.
 
 ## Running it locally

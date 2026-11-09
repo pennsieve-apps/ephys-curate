@@ -26,7 +26,7 @@ METRIC_PANELS = [
     ("snr", "SNR", True),
     ("amplitude_median", "|median amplitude| (uV)", True),
     ("presence_ratio", "presence ratio", False),
-    ("sliding_rp_violation", "refractory contamination (sliding RP)", False),
+    ("sliding_rp_violation", "refractory contamination", False),
     ("amplitude_cutoff", "amplitude cutoff (missed spikes)", False),
     ("firing_rate", "firing rate (Hz)", True),
     ("drift_ptp", "drift peak-to-peak (um)", False),
@@ -124,6 +124,9 @@ def metric_distributions(sid: str, table: pd.DataFrame, thresholds: dict, path: 
         if logx:
             bins = np.logspace(np.log10(lo), np.log10(hi if hi > lo else lo * 10), 30)
             ax.set_xscale("log")
+            from matplotlib.ticker import NullFormatter
+
+            ax.xaxis.set_minor_formatter(NullFormatter())
         else:
             pad = 0.05 * (hi - lo) if hi > lo else max(abs(lo) * 0.05, 0.01)
             bins = np.linspace(lo - pad, hi + pad, 30)
@@ -173,7 +176,7 @@ def unit_gallery(sid: str, table: pd.DataFrame, analyzer, spike_times: dict, n: 
     unit_index = {u: i for i, u in enumerate(analyzer.unit_ids)}
     per_row = 2
     nrow = int(np.ceil(len(sel) / per_row))
-    fig, axes = plt.subplots(nrow, 3 * per_row, figsize=(13, 1.9 * nrow + 0.7), squeeze=False,
+    fig, axes = plt.subplots(nrow, 3 * per_row, figsize=(13, 2.1 * nrow + 0.7), squeeze=False,
                              gridspec_kw={"width_ratios": [1, 1, 1.6] * per_row})
     for k, (uid, row) in enumerate(sel.iterrows()):
         r, c0 = divmod(k, per_row)
@@ -187,8 +190,9 @@ def unit_gallery(sid: str, table: pd.DataFrame, analyzer, spike_times: dict, n: 
             ax.plot(tms, templates[i, :, ch], color=LABEL_COLOURS[row["label"]] if ch == pc else "#b5b3ad",
                     lw=1.6 if ch == pc else 0.9)
         ax.set_xlim(-1.5, 2.5)
-        area = f" {row['brain_area']}" if row.get("brain_area") else ""
-        ax.set_title(f"unit {uid}{area}", fontsize=8, loc="left")
+        area = str(row["brain_area"]) if row.get("brain_area") else ""
+        area = area if len(area) <= 30 else area[:29] + "…"
+        ax.set_title(f"unit {uid}" + (f"\n{area}" if area else ""), fontsize=7.5, loc="left")
         ax.set_ylabel("uV", fontsize=7)
         ax.tick_params(labelsize=7)
         if r == nrow - 1:
