@@ -147,6 +147,16 @@ def peak_rss_mb() -> float | None:
         return None
 
 
+def cgroup_memory_peak_mb() -> float | None:
+    """The container's peak memory (all processes, cgroup v2), when available."""
+    for f in ("/sys/fs/cgroup/memory.peak", "/sys/fs/cgroup/memory/memory.max_usage_in_bytes"):
+        try:
+            return round(int(Path(f).read_text().strip()) / 2**20, 1)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
 def app_version() -> str:
     try:
         return (REPO_ROOT / "VERSION").read_text().strip()
@@ -394,11 +404,19 @@ def main() -> int:
                 bc = C.run_bombcell(analyzer, sess_thr, win, top / f"{sid}_bombcell", threads)
             timings["bombcell"] = round(time.monotonic() - t_b, 2)
             metrics = analyzer.get_metrics_extension_data()
+            if p["PCA_METRICS"]:
+                t_p = time.monotonic()
+                with Heartbeat(f"{sid}: PCA metrics"):
+                    pcam = C.pca_metrics(analyzer, seed=p["SEED"])
+                metrics = metrics.join(pcam.reindex(metrics.index), how="left")
+                timings["pca_metrics"] = round(time.monotonic() - t_p, 2)
+                log.info("  PCA metrics: %.1fs", timings["pca_metrics"])
             ur, ur_missing = None, []
             if mdir is not None:
                 t_u = time.monotonic()
                 try:
-                    ur, ur_missing = C.run_unitrefine(analyzer, mdir)
+                    ur, ur_missing = C.run_unitrefine(
+                        analyzer, mdir, pcam if p["PCA_METRICS"] else None)
                     if ur_missing:
                         msg = (f"{sid}: UnitRefine ran without {', '.join(ur_missing)} (imputed): "
                                "set PCA_METRICS=true for the metrics the models were trained on")
@@ -568,6 +586,7 @@ def main() -> int:
                                "condition": sheet.get("condition", ""), "group": sheet.get("group", ""),
                                "status": "ok", "n_units": s["n_units"], "n_good": s["n_good"], "n_mua": s["n_mua"],
                                "n_noise": s["n_noise"]})
+            statuses[sid]["cgroup_memory_peak_mb"] = cgroup_memory_peak_mb()
             log.info("%s: %d units -> good %d, mua %d, noise %d (Bombcell %s; UnitRefine %s), %.1fs, peak RSS %s MB",
                      sid, s["n_units"], s["n_good"], s["n_mua"], s["n_noise"], s["bombcell"], s["unitrefine"],
                      secs, peak_rss_mb())

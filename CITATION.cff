@@ -486,22 +486,166 @@ references:
     given-names: Han
   - family-names: Zhang
     given-names: Yizi
+  - family-names: Angelaki
+    given-names: Dora
+    alias: listed 2 times in the registry author list
+  - family-names: Benson
+    given-names: Brandon
+    alias: listed 2 times in the registry author list
+  - family-names: Benson
+    given-names: Julius
+    alias: listed 2 times in the registry author list
   - family-names: Birman
     given-names: Daniel
+  - family-names: Bonacchi
+    given-names: Niccolò
+    alias: listed 2 times in the registry author list
   - family-names: Bougrova
     given-names: Kcénia
+  - family-names: Bruijns
+    given-names: Sebastian A.
+    alias: listed 2 times in the registry author list
+  - family-names: Carandini
+    given-names: Matteo
+    alias: listed 2 times in the registry author list
+  - family-names: Catarino
+    given-names: Joana A.
+    alias: listed 2 times in the registry author list
+  - family-names: Chapuis
+    given-names: Gaelle A.
+    alias: listed 2 times in the registry author list
+  - family-names: Churchland
+    given-names: Anne K.
+    alias: listed 2 times in the registry author list
+  - family-names: Dan
+    given-names: Yang
+    alias: listed 2 times in the registry author list
+  - family-names: Davatolhagh
+    given-names: Felicia
+    alias: listed 2 times in the registry author list
+  - family-names: Dayan
+    given-names: Peter
+    alias: listed 2 times in the registry author list
+  - family-names: DeWitt
+    given-names: Eric EJ
+    alias: listed 2 times in the registry author list
   - family-names: Engel
     given-names: Tatiana A.
+  - family-names: Fabbri
+    given-names: Michele
+    alias: listed 2 times in the registry author list
+  - family-names: Faulkner
+    given-names: Mayo
+    alias: listed 2 times in the registry author list
+  - family-names: Fiete
+    given-names: Ila Rani
+    alias: listed 2 times in the registry author list
+  - family-names: Findling
+    given-names: Charles
+    alias: listed 2 times in the registry author list
+  - family-names: Freitas-Silva
+    given-names: Laura
+    alias: listed 2 times in the registry author list
   - family-names: Gerçek
     given-names: Berk
+  - family-names: Harris
+    given-names: Kenneth D.
+    alias: listed 2 times in the registry author list
+  - family-names: Häusser
+    given-names: Michael
+    alias: listed 2 times in the registry author list
+  - family-names: Hofer
+    given-names: Sonja B.
+    alias: listed 2 times in the registry author list
+  - family-names: Hu
+    given-names: Fei
+    alias: listed 2 times in the registry author list
   - family-names: Hubert
     given-names: Félix
+  - family-names: Huntenburg
+    given-names: Julia M.
+    alias: listed 2 times in the registry author list
+  - family-names: Khanal
+    given-names: Anup
+    alias: listed 2 times in the registry author list
+  - family-names: Krasniak
+    given-names: Christopher S.
+    alias: listed 2 times in the registry author list
+  - family-names: Langdon
+    given-names: Christopher
+    alias: listed 2 times in the registry author list
+  - family-names: Langfield
+    given-names: Christopher
+    alias: listed 2 times in the registry author list
+  - family-names: Lau
+    given-names: Petrina Y. P.
+    alias: listed 2 times in the registry author list
+  - family-names: Mainen
+    given-names: Zachary F.
+    alias: listed 2 times in the registry author list
+  - family-names: Meijer
+    given-names: Guido T.
+    alias: listed 2 times in the registry author list
+  - family-names: Miska
+    given-names: Nathaniel J.
+    alias: listed 2 times in the registry author list
   - family-names: Mrsic-Flogel
     given-names: Thomas D.
+  - family-names: Noel
+    given-names: Jean-Paul
+    alias: listed 2 times in the registry author list
+  - family-names: Nylund
+    given-names: Kai
+    alias: listed 2 times in the registry author list
   - family-names: Pan-Vazquez
     given-names: Alejandro
+  - family-names: Paninski
+    given-names: Liam
+    alias: listed 2 times in the registry author list
+  - family-names: Pouget
+    given-names: Alexandre
+    alias: listed 2 times in the registry author list
+  - family-names: Rossant
+    given-names: Cyrille
+    alias: listed 2 times in the registry author list
+  - family-names: Roth
+    given-names: Noam
+    alias: listed 2 times in the registry author list
+  - family-names: Schaeffer
+    given-names: Rylan
+    alias: listed 2 times in the registry author list
   - family-names: Schartner
     given-names: Michael
+  - family-names: Shi
+    given-names: Yanliang
+    alias: listed 2 times in the registry author list
+  - family-names: Socha
+    given-names: Karolina Z.
+    alias: listed 2 times in the registry author list
+  - family-names: Steinmetz
+    given-names: Nicholas A.
+    alias: listed 2 times in the registry author list
+  - family-names: Svoboda
+    given-names: Karel
+    alias: listed 2 times in the registry author list
+  - family-names: Urai
+    given-names: Anne E.
+    alias: listed 2 times in the registry author list
+  - family-names: Wells
+    given-names: Miles J.
+    alias: listed 2 times in the registry author list
+  - family-names: West
+    given-names: Steven J.
+    alias: listed 2 times in the registry author list
+  - family-names: Whiteway
+    given-names: Matthew R.
+    alias: listed 2 times in the registry author list
+  - family-names: Winter
+    given-names: Olivier
+    alias: listed 2 times in the registry author list
+  - family-names: Witten
+    given-names: Ilana B.
+    alias: listed 2 times in the registry author list
   year: 2025
   journal: Nature
   volume: 645

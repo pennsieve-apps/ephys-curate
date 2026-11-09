@@ -190,3 +190,20 @@ def test_numpy_engine_fixture_loads(tmp_path):
     assert r.get_times()[0] == pytest.approx(FX.T_START)
     assert list(r.get_property("brain_area")[:1]) == ["CA1"]
     assert s.get_num_units() == 12
+
+
+def test_streaming_pca_metrics_match_spikeinterface(fixture_dir):
+    """curate.pca_metrics (one unit at a time) gives SpikeInterface's quality_metrics PCA values."""
+    import spikeinterface.full as si
+
+    base = fixture_dir / "linked"
+    r = si.load(base / "recording" / "ephys-prep" / SID / "recording")
+    s = si.load(base / "sorting" / "spike-sort" / SID / "sorting")
+    a = si.create_sorting_analyzer(s, r, format="memory", sparse=True, method="radius", radius_um=100)
+    a.compute(["random_spikes", "noise_levels", "waveforms", "templates"], n_jobs=1, progress_bar=False)
+    a.compute("principal_components", n_components=5, mode="by_channel_local", n_jobs=1, progress_bar=False)
+    a.compute("quality_metrics", metric_names=C.PCA_QUALITY_METRICS, seed=42, n_jobs=1, progress_bar=False)
+    ref = a.get_extension("quality_metrics").get_data()
+    mine = C.pca_metrics(a, seed=42)
+    for c in mine.columns:
+        assert np.allclose(ref[c].to_numpy(float), mine[c].to_numpy(float), equal_nan=True, rtol=1e-4), c

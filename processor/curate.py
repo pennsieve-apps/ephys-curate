@@ -114,8 +114,10 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float):
     ]
     if p["PCA_METRICS"]:
         steps.append(("principal_components", dict(n_components=5, mode="by_channel_local", whiten=True)))
-    names = QUALITY_METRICS + (PCA_QUALITY_METRICS if p["PCA_METRICS"] else [])
-    steps.append(("quality_metrics", dict(metric_names=names, metric_params=qm_params, seed=p["SEED"])))
+    # The PCA metrics are computed afterwards, one unit at a time (pca_metrics()): SpikeInterface's
+    # quality_metrics prepares the PCA data of every unit's neighbourhood at once, which needs
+    # several GB for a few hundred units.
+    steps.append(("quality_metrics", dict(metric_names=QUALITY_METRICS, metric_params=qm_params, seed=p["SEED"])))
     timings = {}
     import time
 
@@ -125,6 +127,64 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float):
         timings[name] = round(time.monotonic() - t, 2)
         log.info("  %s: %.1fs", name, timings[name])
     return analyzer, win, timings
+
+
+def _rss_mb() -> int | None:
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        return None
+    return None
+
+
+def pca_metrics(analyzer, max_spikes_nn: int = 10000, n_neighbors: int = 5, seed: int = 42) -> pd.DataFrame:
+    """isolation_distance, l_ratio, d_prime, nn_hit_rate, nn_miss_rate, silhouette (simplified) per unit.
+
+    The same functions and the same neighbourhood as SpikeInterface's quality_metrics (units whose
+    main channel lies within the unit's sparsity channels, projections on those channels), but
+    computed one unit at a time so memory stays at one neighbourhood.
+    """
+    import time
+
+    from spikeinterface.metrics.quality.pca_metrics import (
+        d_prime_metric, mahalanobis_metrics, nearest_neighbors_metrics, simplified_silhouette_score)
+
+    np.random.seed(seed)
+    pca_ext = analyzer.get_extension("principal_components")
+    unit_ids = list(analyzer.unit_ids)
+    main = analyzer.get_main_channels(outputs="id", with_dict=True)
+    rows = {}
+    t_last = time.monotonic()
+    for k, u in enumerate(unit_ids):
+        if analyzer.is_sparse():
+            chans = analyzer.sparsity.unit_id_to_channel_ids[u]
+            neigh = [o for o in unit_ids if main[o] in chans]
+        else:
+            chans, neigh = analyzer.channel_ids, unit_ids
+        proj, idx = pca_ext.get_some_projections(channel_ids=chans, unit_ids=neigh)
+        labels = analyzer.sorting.unit_ids[idx]
+        pcs = proj.reshape(proj.shape[0], -1)
+        r = {}
+        for names, fn in ((("isolation_distance", "l_ratio"), lambda: mahalanobis_metrics(pcs, labels, u)),
+                          (("d_prime",), lambda: (d_prime_metric(pcs, labels, u) if len(neigh) > 1 else np.nan,)),
+                          (("nn_hit_rate", "nn_miss_rate"),
+                           lambda: nearest_neighbors_metrics(pcs, labels, u, max_spikes_nn, n_neighbors)),
+                          (("silhouette",), lambda: (simplified_silhouette_score(pcs, labels, u),))):
+            try:
+                vals = fn()
+            except Exception:   # noqa: BLE001 - as SpikeInterface: a metric that fails is NaN
+                vals = (np.nan,) * len(names)
+            r.update(dict(zip(names, (float(v) for v in vals))))
+        rows[u] = r
+        n_feat = pcs.shape[1]
+        del proj, pcs
+        if time.monotonic() - t_last > 60 or k < 3:
+            log.info("  PCA metrics: %d / %d units (%d neighbour units, %d x %d features, RSS %s MB)", k + 1,
+                     len(unit_ids), len(neigh), len(labels), n_feat, _rss_mb())
+            t_last = time.monotonic()
+    return pd.DataFrame.from_dict(rows, orient="index")
 
 
 def run_bombcell(analyzer, thresholds: dict, win: dict, out_folder: Path | None, threads: int) -> pd.DataFrame:
@@ -173,7 +233,7 @@ def bombcell_reasons(metrics: pd.DataFrame, thresholds: dict, labels: pd.Series)
     return pd.Series(out, index=labels.index, name="bombcell_reasons")
 
 
-def run_unitrefine(analyzer, models_dir: Path) -> tuple[pd.DataFrame, list[str]]:
+def run_unitrefine(analyzer, models_dir: Path, extra_metrics: pd.DataFrame | None = None) -> tuple[pd.DataFrame, list[str]]:
     """UnitRefine's cascade (as spikeinterface.curation.unitrefine_label_units), from local models.
 
     Metrics a model needs that were not computed (the PCA metrics with PCA_METRICS=false) are passed
@@ -184,6 +244,8 @@ def run_unitrefine(analyzer, models_dir: Path) -> tuple[pd.DataFrame, list[str]]
         ModelBasedClassification, _handle_backwards_compatibility_in_metrics, load_model)
 
     metrics_all = analyzer.get_metrics_extension_data()
+    if extra_metrics is not None and len(extra_metrics.columns):
+        metrics_all = metrics_all.join(extra_metrics.reindex(metrics_all.index), how="left")
     missing_all: set[str] = set()
     results = {}
     unit_ids = list(analyzer.unit_ids)
