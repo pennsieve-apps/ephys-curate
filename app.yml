@@ -1,0 +1,171 @@
+# yaml-language-server: $schema=https://schemas.pennsieve.io/app-manifest/v1.json
+schemaVersion: "1.0"
+application:
+  name: Spike Sorting Curation (Bombcell + UnitRefine)
+  description: >-
+    Decides which spike-sorted units are well-isolated neurons. Builds a SpikeInterface
+    SortingAnalyzer (waveforms, templates, unit locations, quality metrics) from the preprocessed
+    recording and its sorting (spike-sort output, or a Kilosort / Phy folder), labels every unit
+    with Bombcell (rule-based thresholds; Fabre, Harris and Carandini labs, UCL) and UnitRefine
+    (pretrained classifiers; Jain, Musall and colleagues), combines both into a final good / mua /
+    noise label, and writes an NWB Units table with spike times on the session clock, brain area,
+    every metric and the labels, plus units.csv, the analyzer (zarr), optional Phy export and
+    report figures. With an optional reference (an NWB Units table such as IBL's own sorting, or a
+    ground truth) it reports how many units match. Pennsieve packages these methods; it did not
+    develop them. GPL-3.0-or-later (imports Bombcell).
+  type: processor
+  tags:
+    - neuroscience
+    - electrophysiology
+    - nwb
+    - neuropixels
+    - spike-sorting
+    - quality-control
+    - curation
+    - machine-learning
+runtime:
+  cpu: 4096
+  # Measured (linux/amd64 under emulation on an M-series Mac): see README "Runtime".
+  memory: 16384
+  computeTypes:
+    - standard
+  timeoutSeconds: 21600
+parameters:
+  - name: LABEL_RULE
+    type: string
+    description: >-
+      How the final label is made. consensus: good when Bombcell says good AND UnitRefine says
+      sua; noise when either says noise and neither calls it a single unit; mua otherwise.
+      bombcell or unitrefine: that method's labels alone (non_soma and mua -> mua; sua -> good).
+    defaultValue: consensus
+    validValues:
+      - consensus
+      - bombcell
+      - unitrefine
+  - name: PCA_METRICS
+    type: boolean
+    description: >-
+      Compute the PCA-based metrics (isolation distance, L-ratio, d', nearest-neighbour hit/miss
+      rate, silhouette) that UnitRefine's models were trained with. They are the slow part on
+      large sortings; with false, UnitRefine runs with those features imputed (a warning says so).
+    defaultValue: true
+  - name: UNITREFINE
+    type: boolean
+    description: Run UnitRefine's pretrained classifiers. With false, the final label is Bombcell's.
+    defaultValue: true
+  - name: BOMBCELL_THRESHOLDS
+    type: string
+    description: >-
+      Optional JSON overriding Bombcell's thresholds, e.g. {"mua": {"snr": {"greater": 3}}}; a
+      metric set to null is dropped. Sections: noise, mua, non-somatic. Empty = Bombcell's defaults
+      (distance metrics off, as Bombcell does for acute recordings; num_spikes scaled down for
+      windows shorter than 10 min).
+    defaultValue: ""
+  - name: SPARSITY_RADIUS_UM
+    type: number
+    description: Channels within this distance (um) of a unit's peak channel are used for its waveforms and metrics.
+    defaultValue: 100
+    min: 10
+  - name: MAX_SPIKES_PER_UNIT
+    type: integer
+    description: Spikes sampled per unit for waveforms, templates and PCA.
+    defaultValue: 500
+    min: 50
+  - name: EXPORT_PHY
+    type: boolean
+    description: Also write a Phy folder per session (templates, amplitudes, labels as cluster_group.tsv) for manual curation on a desktop.
+    defaultValue: false
+  - name: GALLERY_UNITS
+    type: integer
+    description: Units in the unit gallery figure (best good units by SNR); 0 = no gallery.
+    defaultValue: 12
+    min: 0
+    max: 40
+  - name: REFERENCE_KIND
+    type: string
+    description: >-
+      What the optional reference is: auto (ground truth when the NWB says it is a simulation or
+      ground truth, else a reference sorting), sorting, or ground_truth.
+    defaultValue: auto
+    validValues:
+      - auto
+      - sorting
+      - ground_truth
+  - name: REFERENCE_MIN_SPIKES
+    type: integer
+    description: Reference units with fewer spikes than this inside the recording's window are not scored.
+    defaultValue: 10
+    min: 1
+  - name: MATCH_DELTA_MS
+    type: number
+    description: Two spikes match when they are within this many milliseconds (reference comparison).
+    defaultValue: 0.4
+    min: 0.05
+    max: 5
+  - name: SEED
+    type: integer
+    description: Seed for spike sampling, noise levels and spike locations.
+    defaultValue: 42
+  - name: THREADS
+    type: integer
+    description: Parallel jobs; 0 = from the container's CPU quota.
+    defaultValue: 0
+    min: 0
+inputs:
+  - name: recording
+    description: >-
+      ephys-prep output: ephys-prep/<session_id>/recording/ (SpikeInterface binary_folder with
+      probe, channel brain_area and the recording's times) and ephys-prep/<session_id>/session.json.
+      Any folder SpikeInterface saved a recording to also works.
+    mediaTypes:
+      - application/octet-stream
+      - application/json
+    placement: subfolder
+    required: true
+  - name: sorting
+    description: >-
+      spike-sort output: spike-sort/<session_id>/sorting/ (SpikeInterface numpy_folder, spike
+      times in samples of the recording) with sort.json, or a Kilosort / Phy output folder
+      (params.py, spike_times.npy, spike_clusters.npy, cluster_KSLabel.tsv) sorted from the same
+      recording. Matched to the recording by session_id.
+    mediaTypes:
+      - application/octet-stream
+      - application/json
+      - text/tab-separated-values
+      - text/x-python
+    placement: subfolder
+    required: true
+  - name: reference
+    description: >-
+      Optional: an NWB file with a Units table to compare with (e.g. IBL's processed NWB of the
+      session, a ground-truth simulation), or a CSV of reference spikes (unit_id, spike_time in
+      session seconds). Only units of the same probe and spikes inside the recording's window are
+      compared.
+    mediaTypes:
+      - "application/x-hdf5; profile=nwb"
+      - text/csv
+    placement: subfolder
+    required: false
+outputs:
+  - name: units
+    description: >-
+      ephys-curate/<session_id>_units.nwb (NWB Units: spike_times in session-clock seconds,
+      electrodes / peak_channel, brain_area, waveform_mean, every quality and template metric,
+      bombcell_label, unitrefine_label, label, kslabel), units.csv, <session_id>_analyzer.zarr,
+      <session_id>_bombcell/, optional <session_id>_phy/, figures, sessions.csv, summary.json,
+      provenance.json.
+    mediaTypes:
+      - "application/x-hdf5; profile=nwb"
+      - text/csv
+      - application/json
+      - image/png
+    formats:
+      - format_3915
+
+# How a release is tested before it is made public: the inputs a review run uses.
+# See app-deploy-service docs/app-manifest-review.md. The generator needs only numpy.
+review:
+  version: 1
+  generate:
+    command: python -m tests.make_fixture "$REVIEW_INPUT_DIR" --layout linked --engine numpy
+    root: linked
