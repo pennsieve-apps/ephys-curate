@@ -231,7 +231,7 @@ projections of 500 spikes per unit) more than with duration; scratch disk (`$TMP
 raw waveform snippets, about units × 500 × 150 samples × ~40 channels × 4 bytes (≈ 5 GB for 450
 units), deleted at the end. A 10-minute probe with ~700 units took 21 minutes in one process with a 5.2 GB peak; 16 GiB leaves
 room for 1,000+ units or longer recordings, and 4 vCPUs parallelise the chunked steps on Linux. The PCA step and PCA
-metrics dominate; `PCA_METRICS=false` removes both. Image: 1.63 GB.
+metrics dominate; `PCA_METRICS=false` removes both. Image: about 1.25 GB unpacked (374 MB compressed).
 
 ## Running it locally
 
