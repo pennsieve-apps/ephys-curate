@@ -238,6 +238,8 @@ def discover(input_dir: Path) -> Inputs:
         dirnames[:] = []
         if kind != "sorting":
             continue
+        if "sorter_output" in d.relative_to(sort_root).parts[:-1]:
+            continue        # the sorter's own copy inside spike-sort's sorter_output/ (the numpy_folder is used)
         sj = d.parent / "sort.json"
         sort = _read_json(sj) if sj.is_file() else {}
         explicit = sort.get("session_id")

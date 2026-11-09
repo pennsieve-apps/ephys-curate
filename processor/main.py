@@ -353,7 +353,7 @@ def main() -> int:
 
     top = output_dir / APP_NAME
     top.mkdir(parents=True, exist_ok=True)
-    work_root = Path(tempfile.gettempdir()) / f"{APP_NAME}-work"
+    work_root = Path(tempfile.mkdtemp(prefix=f"{APP_NAME}-work-"))   # unique per run
     statuses: dict = {}
     summaries: dict = {}
     figures: list = []
