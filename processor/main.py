@@ -284,7 +284,23 @@ CAPTIONS = {
 }
 
 
+_RUN_STACK = None
+
+
 def main() -> int:
+    """Runs the app; patches made for the run (no /dev/shm) are undone when it returns."""
+    import contextlib
+
+    global _RUN_STACK
+    with contextlib.ExitStack() as stack:
+        _RUN_STACK = stack
+        try:
+            return _main()
+        finally:
+            _RUN_STACK = None
+
+
+def _main() -> int:
     started = datetime.now(timezone.utc)
     t0 = time.monotonic()
     input_dir, output_dir = os.environ.get("INPUT_DIR"), os.environ.get("OUTPUT_DIR")
@@ -344,10 +360,7 @@ def main() -> int:
                  "of processes, shared arrays in process memory",
                  __import__("processor.shm", fromlist=["x"]).MIN_FREE_MB, threads)
         import spikeinterface.sortingcomponents.tools  # noqa: F401 - loaded before its functions are patched
-        import contextlib as _cl
-
-        _no_shm = _cl.ExitStack()
-        _no_shm.enter_context(__import__("processor.shm", fromlist=["x"]).local_shared_memory(True))
+        _RUN_STACK.enter_context(__import__("processor.shm", fromlist=["x"]).local_shared_memory(True))
     np.random.seed(p["SEED"])
 
     found = discover(input_dir)
