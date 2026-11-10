@@ -99,18 +99,32 @@ def template_jobs(n_units: int, recording, radius_um: float, threads: int, path:
 SPIKE_VECTOR_BYTES = 24     # SpikeInterface's spike vector: sample, unit, segment indices (int64)
 
 
-def pca_jobs(n_spikes: int, threads: int, path: str = SHM_PATH) -> tuple[int, str]:
-    """Workers for principal_components: with n_jobs > 1 it copies the whole spike vector into
-    /dev/shm (sorting.to_multiprocessing -> SharedMemorySorting, 24 bytes per spike), which
-    overflows Docker's/ECS's default 64 MB above about 2.8 M spikes (SIGBUS). One worker then."""
+def pca_jobs(threads: int, path: str = SHM_PATH) -> tuple[int, str]:
+    """Workers for principal_components: its fitting uses a process pool whatever the pool engine,
+    which needs a usable /dev/shm (its locks); one worker otherwise. (It does not copy the spike
+    vector into /dev/shm in this app: that happens only in run_for_all_spikes, see phy_jobs.)"""
     if threads <= 1:
         return 1, "1 job"
-    need = SPIKE_VECTOR_BYTES * int(n_spikes)
-    free = shm_free_bytes(path) if shm_usable(path) else None
-    if free is None:
+    if not shm_usable(path):
         return 1, "no usable /dev/shm: 1 job"
+    return threads, f"{threads} jobs"
+
+
+def phy_jobs(n_spikes: int, threads: int, compute_pc_features: bool, path: str = SHM_PATH) -> tuple[int, str]:
+    """Workers for export_to_phy. With compute_pc_features=True it projects every spike
+    (principal_components.run_for_all_spikes), which with n_jobs > 1 copies the whole spike vector
+    into /dev/shm (sorting.to_multiprocessing -> SharedMemorySorting, 24 bytes per spike): one
+    worker when that exceeds 80 % of the free space (Docker's/ECS's 64 MB holds about 2.8 M spikes)."""
+    if threads <= 1:
+        return 1, "1 job"
+    if not shm_usable(path):
+        return 1, "no usable /dev/shm: 1 job"
+    if not compute_pc_features:
+        return threads, f"{threads} jobs"
+    need = SPIKE_VECTOR_BYTES * int(n_spikes)
+    free = shm_free_bytes(path) or 0
     if need > free * SAFETY:
-        return 1, (f"{n_spikes:,} spikes need {need / 2**20:.0f} MB of /dev/shm for parallel workers, "
+        return 1, (f"{n_spikes:,} spikes need {need / 2**20:.0f} MB of /dev/shm for parallel PC features, "
                    f"{free / 2**20:.0f} MB free: 1 job")
     return threads, f"{n_spikes:,} spikes, {need / 2**20:.0f} of {free / 2**20:.0f} MB /dev/shm: {threads} jobs"
 

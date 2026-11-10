@@ -288,19 +288,22 @@ def test_template_estimation_without_dev_shm(fixture_dir, tmp_path):
     assert np.allclose(t_local, t_shm, atol=1e-3), float(np.nanmax(np.abs(t_local - t_shm)))
 
 
-def test_pca_jobs_capped_by_dev_shm(monkeypatch):
-    """principal_components with n_jobs > 1 copies 24 bytes per spike into /dev/shm: 1 job when that
-    does not fit (e.g. an hour of Neuropixels in Docker's default 64 MB)."""
+def test_pca_and_phy_jobs_and_dev_shm(monkeypatch):
+    """principal_components keeps THREADS jobs whatever the spike count (it does not put the spike
+    vector in /dev/shm here), 1 job only without a usable /dev/shm; a Phy export with PC features
+    (which does copy 24 B/spike into /dev/shm) drops to 1 job when that does not fit."""
     from processor import shm as SH
 
     monkeypatch.setattr(SH, "shm_usable", lambda path=SH.SHM_PATH: True)
     monkeypatch.setattr(SH, "shm_free_bytes", lambda path=SH.SHM_PATH: 64 * 2**20)
-    n, why = SH.pca_jobs(10_000_000, 4)
+    assert SH.pca_jobs(4)[0] == 4
+    assert SH.phy_jobs(10_000_000, 4, compute_pc_features=False)[0] == 4
+    assert SH.phy_jobs(1_000_000, 4, compute_pc_features=True)[0] == 4      # 24 MB fits in 80 % of 64 MB
+    n, why = SH.phy_jobs(2_800_000, 4, compute_pc_features=True)            # 67 MB does not
     assert n == 1 and "1 job" in why
-    assert SH.pca_jobs(1_000_000, 4)[0] == 4                 # 24 MB fits in 80 % of 64 MB
-    assert SH.pca_jobs(2_800_000, 4)[0] == 1                 # 67 MB does not
     monkeypatch.setattr(SH, "shm_usable", lambda path=SH.SHM_PATH: False)
-    assert SH.pca_jobs(10, 4)[0] == 1
+    assert SH.pca_jobs(4)[0] == 1
+    assert SH.phy_jobs(10, 4, compute_pc_features=False)[0] == 1
 
 
 def test_sd_ratio_reproducible(fixture_dir):

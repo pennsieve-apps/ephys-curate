@@ -196,7 +196,7 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float, t
         pc = dict(n_components=5, mode="by_channel_local", whiten=True)
         from processor.shm import pca_jobs
 
-        n_pc, why = pca_jobs(int(sorting.count_total_num_spikes()), threads)
+        n_pc, why = pca_jobs(threads)
         if n_pc != threads:
             pc["n_jobs"] = n_pc
         log.info("  principal_components: %s", why)

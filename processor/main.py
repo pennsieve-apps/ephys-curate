@@ -598,10 +598,15 @@ def _main() -> int:
 
             # Phy, analyzer
             if p["EXPORT_PHY"]:
+                from processor.shm import phy_jobs
+
+                pc_features = False     # the PC features need every spike projected (slow, large)
+                n_phy, why = phy_jobs(int(sorting.count_total_num_spikes()), threads, pc_features)
+                log.info("  phy export: %s", why)
                 with Heartbeat(f"{sid}: phy export"):
-                    si.export_to_phy(analyzer, top / f"{sid}_phy", compute_pc_features=False,
+                    si.export_to_phy(analyzer, top / f"{sid}_phy", compute_pc_features=pc_features,
                                      compute_amplitudes=True, copy_binary=False, remove_if_exists=True,
-                                     verbose=False)
+                                     verbose=False, n_jobs=n_phy)
             # The raw waveform snippets (GBs) and the PCA models (pickled sklearn objects, which zarr
             # will not load without allowing unsafe pickles) are not kept; their results are.
             for ext in ("waveforms", "principal_components"):

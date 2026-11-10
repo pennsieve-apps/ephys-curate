@@ -249,10 +249,10 @@ and Lambda (or `docker run --ipc none`) none at all, which would crash a large s
 measures the free `/dev/shm`, uses as many workers as fit (at most `THREADS`), and when not even
 one fits, or there is no `/dev/shm`, runs that step in one process with ordinary memory
 (`processor/shm.py`; the log says which). With no `/dev/shm`, or less than 32 MB free, the whole
-run uses SpikeInterface's thread pools and keeps its shared arrays in process memory. `principal_components` with several workers also copies the
-whole spike vector into `/dev/shm` (24 bytes per spike: about 62 MB for the 10-minute IBL window,
-so an hour-long session would overflow 64 MB); it runs with one worker whenever that would not fit
-in 80 % of the free space. Tested with `--ipc none` and with the default 64 MB.
+run uses SpikeInterface's thread pools and keeps its shared arrays in process memory. A Phy export with PC features (not enabled: `compute_pc_features=False`)
+would copy the whole spike vector into `/dev/shm` (24 bytes per spike, about 65 MB for the
+10-minute IBL window); `processor/shm.py` then drops it to one worker when that does not fit in
+80 % of the free space. Tested with `--ipc none` and with the default 64 MB.
 
 The image is Lambda-safe (read-only root, any unprivileged user, writable caches under `$TMPDIR`),
 but the step is sized for standard compute: curating a 10-minute Neuropixels session takes longer
