@@ -40,8 +40,8 @@ people. This app gives every unit two independent automated opinions and a combi
   trough-to-peak duration, baseline flatness) for noise; amplitude, SNR, refractory-period
   contamination, fraction of missed spikes, presence through the recording and drift for
   multi-unit; and waveform shape again for non-somatic (axonal) spikes.
-- **UnitRefine** is a pair of random-forest classifiers trained on units that several experts
-  labelled by hand (Neuropixels 1.0, mouse visual cortex, superior colliculus and ALM): first
+- **UnitRefine** is a pair of random-forest classifiers trained on units labelled by hand, each recording by at least two
+  people (Neuropixels recordings of 11 mice: visual cortex, superior colliculus and ALM): first
   noise vs neural, then single (SUA) vs multi-unit (MUA).
 
 A unit is **good** only when both call it a single unit. The output is an NWB file you can
@@ -178,7 +178,7 @@ logged and skipped.
 
 ## Results on the demo data
 
-All runs with the defaults.
+All runs with the default parameters (the IBL run also with `EXPORT_PHY=true` and `THREADS=1`).
 
 **IBL, `sub-NR-0031_ses-caa5dddc`, Probe01, the 10-minute demo window (899.67–1499.67 s on the
 session clock), 383 channels**, from the workflow's own upstream steps: ephys-prep (NWB timestamps
@@ -192,7 +192,8 @@ visual-cortex layers and fibre tracts at the top of the probe give mua and noise
 IBL's own sorting of the same probe and window (iblsorter, IBL's port of Kilosort 2.5; 534 units
 with ≥ 10 spikes in the window; spikes matched within 0.4 ms on the same clock): **38 of our 40
 good units match an IBL unit** (median agreement 0.96; 26 of the 38 are IBL-good), 129 of 460 mua
-and 12 of 183 noise units do; **59 of the 70 IBL-good units are recovered**. Agreement measures
+and 12 of 183 noise units do; **59 of the 70 IBL-good units have one of our units with agreement ≥ 0.5** (54 with
+one-to-one matching). Agreement measures
 consistency between two sorters, not correctness. Output: `data/work/ibl/ephys-curate/`.
 
 An earlier test on a 120 s cut of the same probe (1000–1120 s; our own stand-in preprocessing and
@@ -219,7 +220,7 @@ takes longer than 15 minutes).
 
 | Data | Units | Where | Wall time | Peak memory |
 |---|---|---|---|---|
-| IBL Probe01, 600 s, 383 ch (demo window) | 685 → 683 | native arm64 macOS, 1 process (`THREADS=1`) | 1,282 s (auto-merge 65 s, amplitude scalings 167 s, PCA 111 s, PCA metrics 381 s) | 5.2 GB RSS |
+| IBL Probe01, 600 s, 383 ch (demo window) | 685 → 683 | native arm64 macOS, 1 process (`THREADS=1`) | 1,196–1,280 s in two runs (auto-merge 43–65 s, amplitude scalings 148–167 s, spike locations 416–421 s, PCA 87–111 s, PCA metrics 365–381 s) | 5.0–5.4 GB RSS |
 | IBL Probe01, 120 s, 384 ch | 450 → 449 | native arm64 macOS, 1 process (`THREADS=1`) | 851 s (auto-merge 58 s, spike locations 178 s, PCA 116 s, PCA metrics 345 s) | 2.8 GB RSS |
 | Ground truth, 60 s, 120 ch | 238 | Docker linux/amd64 under emulation on an M-series Mac, `--cpus 4 --memory 4g` | 984 s (PCA 384 s, PCA metrics 188 s) | 2.0 GB (cgroup `memory.peak`) |
 | Synthetic fixture, 60 s, 32 ch | 13 → 12 | Docker linux/amd64 (emulated), `--read-only --user 65534:65534 --tmpfs /tmp`, 4 CPUs | 225 s | 0.75 GB RSS |
@@ -229,9 +230,9 @@ builders, and two attempts were killed by the VM's OOM killer (not by the contai
 other containers were running. Peak memory grows with the number of units (templates, PCA
 projections of 500 spikes per unit) more than with duration; scratch disk (`$TMPDIR`) holds the
 raw waveform snippets, about units × 500 × 150 samples × ~40 channels × 4 bytes (≈ 5 GB for 450
-units), deleted at the end. A 10-minute probe with ~700 units took 21 minutes in one process with a 5.2 GB peak; 16 GiB leaves
-room for 1,000+ units or longer recordings, and 4 vCPUs parallelise the chunked steps on Linux. The PCA step and PCA
-metrics dominate; `PCA_METRICS=false` removes both. Image: about 1.25 GB unpacked (374 MB compressed).
+units), deleted at the end. A 10-minute probe with ~700 units took 20–21 minutes in one process with a 5.0–5.4 GB peak; 16 GiB leaves
+room for 1,000+ units or longer recordings, and 4 vCPUs parallelise the chunked steps on Linux. Spike locations, the PCA step and the PCA
+metrics dominate; `PCA_METRICS=false` removes the last two. Image: about 1.6 GB unpacked (374 MB compressed).
 
 ## Running it locally
 
@@ -259,7 +260,7 @@ docker run --rm --platform linux/amd64 --network none --memory 16g \
 ## Limitations
 
 - **Automated labels are opinions, not truth.** Bombcell's thresholds and UnitRefine's training
-  labels encode particular labs' judgement on particular probes (UnitRefine: Neuropixels 1.0 in
+  labels encode particular labs' judgement on particular probes (UnitRefine: Neuropixels in
   mouse V1, SC and ALM). On other probes, species, brain regions or simulated data they can be
   systematically off (on the ground-truth simulation UnitRefine calls 194 of 238 units noise; see
   Results). Look at the gallery and metric figures, and check a sample of units by eye before you
@@ -370,7 +371,7 @@ cortex-lab, UCL).
 Bombcell is developed by Julie Fabre and colleagues in the Carandini–Harris lab at UCL;
 UnitRefine by Anoushka Jain, Simon Musall and colleagues with the SpikeInterface team;
 SpikeInterface by its community of contributors. The demo recordings are from the **International Brain Laboratory**
-(supported by the Simons Foundation and Wellcome) and the ground-truth simulation from Laquitaine
+(supported by Wellcome, the Simons Foundation and the NIH) and the ground-truth simulation from Laquitaine
 et al. (Blue Brain Project, EPFL), both shared through the **DANDI Archive** (NIH BRAIN
 Initiative) in **Neurodata Without Borders** format. We thank all of them for making their
 methods, models and data openly available.

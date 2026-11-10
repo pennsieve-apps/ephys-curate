@@ -26,7 +26,7 @@ application:
     - machine-learning
 runtime:
   cpu: 4096
-  # Measured (linux/amd64 under emulation on an M-series Mac): see README "Runtime".
+  # Measured natively (arm64, IBL demo) and under linux/amd64 emulation: see README "Runtime".
   memory: 16384
   computeTypes:
     - standard
