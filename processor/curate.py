@@ -15,6 +15,7 @@ Waveforms, metrics and automated curation of one session.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import shutil
@@ -131,6 +132,35 @@ def auto_merge(sorting, recording, p: dict, threads: int = 1) -> tuple:
     return merged, out
 
 
+@contextlib.contextmanager
+def seeded_noise_levels(seed: int):
+    """Make SpikeInterface's get_noise_levels reproducible inside quality_metrics.
+
+    compute_sd_ratio (SpikeInterface 0.105.4) calls get_noise_levels without a seed, so sd_ratio
+    changed from run to run; within the block an unseeded call gets random_slices_kwargs seed=SEED.
+    """
+    import spikeinterface.core as sic
+    import spikeinterface.core.recording_tools as rt
+
+    orig = rt.get_noise_levels
+
+    def seeded(recording, *args, **kwargs):
+        rsk = dict(kwargs.pop("random_slices_kwargs", None) or {})
+        rsk.setdefault("seed", seed)
+        return orig(recording, *args, random_slices_kwargs=rsk, **kwargs)
+
+    saved = [(rt, orig)]
+    rt.get_noise_levels = seeded
+    if getattr(sic, "get_noise_levels", None) is orig:
+        saved.append((sic, orig))
+        sic.get_noise_levels = seeded
+    try:
+        yield
+    finally:
+        for mod, f in saved:
+            mod.get_noise_levels = f
+
+
 def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float, threads: int = 1):
     import spikeinterface.full as si
 
@@ -164,10 +194,12 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float, t
     ]
     if p["PCA_METRICS"]:
         pc = dict(n_components=5, mode="by_channel_local", whiten=True)
-        from processor.shm import shm_usable
+        from processor.shm import pca_jobs
 
-        if not shm_usable():
-            pc["n_jobs"] = 1      # its fitting uses a process pool whatever the pool engine
+        n_pc, why = pca_jobs(int(sorting.count_total_num_spikes()), threads)
+        if n_pc != threads:
+            pc["n_jobs"] = n_pc
+        log.info("  principal_components: %s", why)
         steps.append(("principal_components", pc))
     # The PCA metrics are computed afterwards, one unit at a time (pca_metrics()): SpikeInterface's
     # quality_metrics prepares the PCA data of every unit's neighbourhood at once, which needs
@@ -178,7 +210,8 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float, t
 
     for name, kw in steps:
         t = time.monotonic()
-        analyzer.compute(name, **kw)
+        with seeded_noise_levels(p["SEED"]) if name == "quality_metrics" else contextlib.nullcontext():
+            analyzer.compute(name, **kw)
         timings[name] = round(time.monotonic() - t, 2)
         log.info("  %s: %.1fs", name, timings[name])
     return analyzer, win, timings

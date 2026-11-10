@@ -340,8 +340,9 @@ def main() -> int:
         # No usable /dev/shm (AWS Lambda, docker --ipc none): process pools cannot even create their
         # locks, so SpikeInterface runs its chunked steps on threads, and the PCA metrics in one process.
         si.set_global_job_kwargs(n_jobs=threads, chunk_duration="1s", progress_bar=False, pool_engine="thread")
-        log.info("no usable /dev/shm: SpikeInterface jobs on %d threads instead of processes, shared arrays in "
-                 "process memory", threads)
+        log.info("no usable /dev/shm (missing or under %d MB free): SpikeInterface jobs on %d threads instead "
+                 "of processes, shared arrays in process memory",
+                 __import__("processor.shm", fromlist=["x"]).MIN_FREE_MB, threads)
         import spikeinterface.sortingcomponents.tools  # noqa: F401 - loaded before its functions are patched
         import contextlib as _cl
 

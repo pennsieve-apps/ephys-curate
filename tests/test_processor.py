@@ -286,3 +286,38 @@ def test_template_estimation_without_dev_shm(fixture_dir, tmp_path):
     t_shm = b.get_extension("templates").get_data()
     assert np.array_equal(a.sparsity.mask, b.sparsity.mask)
     assert np.allclose(t_local, t_shm, atol=1e-3), float(np.nanmax(np.abs(t_local - t_shm)))
+
+
+def test_pca_jobs_capped_by_dev_shm(monkeypatch):
+    """principal_components with n_jobs > 1 copies 24 bytes per spike into /dev/shm: 1 job when that
+    does not fit (e.g. an hour of Neuropixels in Docker's default 64 MB)."""
+    from processor import shm as SH
+
+    monkeypatch.setattr(SH, "shm_usable", lambda path=SH.SHM_PATH: True)
+    monkeypatch.setattr(SH, "shm_free_bytes", lambda path=SH.SHM_PATH: 64 * 2**20)
+    n, why = SH.pca_jobs(10_000_000, 4)
+    assert n == 1 and "1 job" in why
+    assert SH.pca_jobs(1_000_000, 4)[0] == 4                 # 24 MB fits in 80 % of 64 MB
+    assert SH.pca_jobs(2_800_000, 4)[0] == 1                 # 67 MB does not
+    monkeypatch.setattr(SH, "shm_usable", lambda path=SH.SHM_PATH: False)
+    assert SH.pca_jobs(10, 4)[0] == 1
+
+
+def test_sd_ratio_reproducible(fixture_dir):
+    import spikeinterface.full as si
+
+    base = fixture_dir / "linked"
+    s = si.load(base / "sorting" / "spike-sort" / SID / "sorting")
+    vals = []
+    for _ in range(2):
+        # a fresh recording each time: get_noise_levels caches its result on the recording object
+        r = si.load(base / "recording" / "ephys-prep" / SID / "recording")
+        a = si.create_sorting_analyzer(s, r, format="memory", sparse=True, seed=1,
+                                       sparsity_kwargs=dict(method="radius", radius_um=100.0),
+                                       job_kwargs=dict(n_jobs=1, progress_bar=False))
+        a.compute("random_spikes", seed=1)
+        a.compute(["noise_levels", "templates", "spike_amplitudes"], n_jobs=1, progress_bar=False)
+        with C.seeded_noise_levels(42):
+            a.compute("quality_metrics", metric_names=["sd_ratio"], n_jobs=1, progress_bar=False)
+        vals.append(a.get_extension("quality_metrics").get_data()["sd_ratio"].to_numpy())
+    assert np.allclose(vals[0], vals[1], equal_nan=True)

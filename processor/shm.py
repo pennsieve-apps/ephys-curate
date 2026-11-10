@@ -27,6 +27,7 @@ log = logging.getLogger("ephys-curate")
 
 SHM_PATH = "/dev/shm"
 SAFETY = 0.8          # use at most 80 % of the free space
+MIN_FREE_MB = 32      # below this, run SpikeInterface on threads with process-memory arrays
 
 
 def shm_free_bytes(path: str = SHM_PATH) -> int | None:
@@ -41,7 +42,12 @@ def shm_free_bytes(path: str = SHM_PATH) -> int | None:
 def shm_usable(path: str = SHM_PATH) -> bool:
     """Whether POSIX shared memory works here (multiprocessing locks and SharedMemory need it).
 
-    Cached: the first call (at startup, before any patching) decides for the run."""
+    Cached: the first call (at startup, before any patching) decides for the run. Less than
+    MIN_FREE_MB free counts as unusable: SpikeInterface's process pools put smaller buffers there too
+    (e.g. the waveform prototypes of spike_locations), which a tiny /dev/shm turns into SIGBUS."""
+    free = shm_free_bytes(path)
+    if free is None or free < MIN_FREE_MB * 2**20:
+        return False
     try:
         from multiprocessing.shared_memory import SharedMemory
 
@@ -88,6 +94,25 @@ def template_jobs(n_units: int, recording, radius_um: float, threads: int, path:
     return 1, True, (f"{path} has {free / 2**20:.0f} MB free, {per / 2**20:.1f} MB needed per template worker "
                      f"({per_sparse / 2**20:.1f} MB sparse{'' if fits_sparse else ', also too much'}): "
                      "template estimation in process memory, 1 job")
+
+
+SPIKE_VECTOR_BYTES = 24     # SpikeInterface's spike vector: sample, unit, segment indices (int64)
+
+
+def pca_jobs(n_spikes: int, threads: int, path: str = SHM_PATH) -> tuple[int, str]:
+    """Workers for principal_components: with n_jobs > 1 it copies the whole spike vector into
+    /dev/shm (sorting.to_multiprocessing -> SharedMemorySorting, 24 bytes per spike), which
+    overflows Docker's/ECS's default 64 MB above about 2.8 M spikes (SIGBUS). One worker then."""
+    if threads <= 1:
+        return 1, "1 job"
+    need = SPIKE_VECTOR_BYTES * int(n_spikes)
+    free = shm_free_bytes(path) if shm_usable(path) else None
+    if free is None:
+        return 1, "no usable /dev/shm: 1 job"
+    if need > free * SAFETY:
+        return 1, (f"{n_spikes:,} spikes need {need / 2**20:.0f} MB of /dev/shm for parallel workers, "
+                   f"{free / 2**20:.0f} MB free: 1 job")
+    return threads, f"{n_spikes:,} spikes, {need / 2**20:.0f} of {free / 2**20:.0f} MB /dev/shm: {threads} jobs"
 
 
 class _LocalShm:

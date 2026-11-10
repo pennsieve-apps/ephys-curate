@@ -75,7 +75,8 @@ lazily in 1 s chunks):
    `quality_metrics`: num_spikes, firing_rate, presence_ratio, snr, isi_violation, rp_violation,
    sliding_rp_violation, amplitude_cutoff, amplitude_median, amplitude_cv, firing_range, drift,
    sd_ratio, synchrony, noise_cutoff, and with `PCA_METRICS` isolation distance, L-ratio, d′,
-   nearest-neighbour hit/miss rates and silhouette. The PCA metrics use SpikeInterface's functions
+   nearest-neighbour hit/miss rates and silhouette. `sd_ratio`'s noise estimate is seeded with `SEED` (SpikeInterface
+   0.105.4 does not pass one, so it varied between runs by up to 0.2). The PCA metrics use SpikeInterface's functions
    and neighbourhoods but are computed one unit at a time over forked workers: SpikeInterface's own
    `quality_metrics` prepares every unit's PCA neighbourhood at once, which ran out of 4–8 GB of
    memory on 238 units (the values are identical; `tests/` checks it). They are in `units.csv` and the
@@ -247,7 +248,11 @@ samples × channels × 4 bytes, twice with the standard deviation. Docker gives 
 and Lambda (or `docker run --ipc none`) none at all, which would crash a large sorting. The app
 measures the free `/dev/shm`, uses as many workers as fit (at most `THREADS`), and when not even
 one fits, or there is no `/dev/shm`, runs that step in one process with ordinary memory
-(`processor/shm.py`; the log says which). Tested with `--ipc none` and with the default 64 MB.
+(`processor/shm.py`; the log says which). With no `/dev/shm`, or less than 32 MB free, the whole
+run uses SpikeInterface's thread pools and keeps its shared arrays in process memory. `principal_components` with several workers also copies the
+whole spike vector into `/dev/shm` (24 bytes per spike: about 62 MB for the 10-minute IBL window,
+so an hour-long session would overflow 64 MB); it runs with one worker whenever that would not fit
+in 80 % of the free space. Tested with `--ipc none` and with the default 64 MB.
 
 The image is Lambda-safe (read-only root, any unprivileged user, writable caches under `$TMPDIR`),
 but the step is sized for standard compute: curating a 10-minute Neuropixels session takes longer
