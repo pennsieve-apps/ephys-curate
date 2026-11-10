@@ -61,7 +61,7 @@ def write_units_nwb(path: Path, session_id: str, session: dict, recording, table
     src = session.get("source") or "the recording"
     notes_text = (f"derived from {Path(str(src)).name} (identifier {session.get('identifier') or 'unknown'}) by "
                   f"ephys-curate {app_version}: units curated with a SpikeInterface SortingAnalyzer, Bombcell and "
-                  "UnitRefine.")
+                  "UnitRefine." + (f" session_start_time {notes['session_start_time']}." if notes else ""))
     kw = dict(
         session_description=session.get("session_description") or f"{session_id}: curated spike-sorted units",
         identifier=str(uuid.uuid4()), session_start_time=start,

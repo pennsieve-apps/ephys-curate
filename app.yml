@@ -7,7 +7,7 @@ application:
     SortingAnalyzer (waveforms, templates, unit locations, quality metrics) from the preprocessed
     recording and its sorting (spike-sort output, or a Kilosort / Phy folder), merges over-split
     units (SLAy; Koukuntla, Charles and colleagues), labels every unit
-    with Bombcell (rule-based thresholds; Fabre, Harris and Carandini labs, UCL) and UnitRefine
+    with Bombcell (rule-based thresholds; Carandini–Harris lab (cortex-lab), UCL) and UnitRefine
     (pretrained classifiers; Jain, Musall and colleagues), combines both into a final good / mua /
     noise label, and writes an NWB Units table with spike times on the session clock, brain area,
     every metric and the labels, plus units.csv, the analyzer (zarr), optional Phy export and

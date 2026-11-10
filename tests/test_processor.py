@@ -249,3 +249,40 @@ def test_non_nominal_time_vector(tmp_path, monkeypatch, sim):
     assert s["time_source"] == "recording timestamps"
     assert s["reference"]["n_well_detected"] >= 7       # 7 of the 8 good (unit 7 stays split: no auto-merge)
     _sh.rmtree(tmp_path / "fx")
+
+
+def test_template_estimation_without_dev_shm(fixture_dir, tmp_path):
+    """No /dev/shm (Lambda, docker --ipc none): template estimation falls back to process memory."""
+    import spikeinterface.full as si
+
+    from processor import shm as SH
+
+    base = fixture_dir / "linked"
+    r = si.load(base / "recording" / "ephys-prep" / SID / "recording")
+    s = si.load(base / "sorting" / "spike-sort" / SID / "sorting")
+    n, local, why = SH.template_jobs(s.get_num_units(), r, 100.0, 4, path=str(tmp_path / "no-shm"))
+    assert (n, local) == (1, True) and "no " in why
+    tiny = tmp_path / "tiny"
+    tiny.mkdir()
+    assert SH.accumulator_bytes_per_worker(13, 32, 30000.0) > 0
+    with SH.local_shared_memory(True):
+        import multiprocessing.shared_memory as msm
+
+        assert msm.SharedMemory is SH._LocalShm
+        a = si.create_sorting_analyzer(s, r, format="memory", sparse=True,
+                                       sparsity_kwargs=dict(method="radius", radius_um=100.0),
+                                       job_kwargs=dict(n_jobs=1, progress_bar=False), seed=1)
+        a.compute("random_spikes", seed=1)
+        a.compute("templates", ms_before=2.0, ms_after=3.0, n_jobs=1, progress_bar=False)
+        t_local = a.get_extension("templates").get_data()
+    import multiprocessing.shared_memory as msm
+
+    assert msm.SharedMemory is not SH._LocalShm             # restored
+    b = si.create_sorting_analyzer(s, r, format="memory", sparse=True,
+                                   sparsity_kwargs=dict(method="radius", radius_um=100.0),
+                                   job_kwargs=dict(n_jobs=1, progress_bar=False), seed=1)
+    b.compute("random_spikes", seed=1)
+    b.compute("templates", ms_before=2.0, ms_after=3.0, n_jobs=1, progress_bar=False)
+    t_shm = b.get_extension("templates").get_data()
+    assert np.array_equal(a.sparsity.mask, b.sparsity.mask)
+    assert np.allclose(t_local, t_shm, atol=1e-3), float(np.nanmax(np.abs(t_local - t_shm)))

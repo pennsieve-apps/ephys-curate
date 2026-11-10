@@ -236,6 +236,14 @@ metrics dominate; `PCA_METRICS=false` removes the last two. Image: about 1.6 GB 
 
 ## Running it locally
 
+**Shared memory.** SpikeInterface estimates templates (main channels when the analyzer is created,
+and the auto-merge templates) with one accumulator per worker in `/dev/shm`: workers × units ×
+samples × channels × 4 bytes, twice with the standard deviation. Docker gives 64 MB by default
+and Lambda (or `docker run --ipc none`) none at all, which would crash a large sorting. The app
+measures the free `/dev/shm`, uses as many workers as fit (at most `THREADS`), and when not even
+one fits, or there is no `/dev/shm`, runs that step in one process with ordinary memory
+(`processor/shm.py`; the log says which). Tested with `--ipc none` and with the default 64 MB.
+
 The image is Lambda-safe (read-only root, any unprivileged user, writable caches under `$TMPDIR`),
 but the step is sized for standard compute: curating a 10-minute Neuropixels session takes longer
 than Lambda's 15 minutes. Tested with `docker run --read-only --user 65534:65534 --tmpfs /tmp`.

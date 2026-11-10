@@ -331,7 +331,22 @@ def main() -> int:
     except ValueError as exc:
         log.error("%s", exc)
         return 2
-    si.set_global_job_kwargs(n_jobs=threads, chunk_duration="1s", progress_bar=False)
+    from processor.shm import shm_usable
+
+    process_pools = shm_usable()
+    if process_pools:
+        si.set_global_job_kwargs(n_jobs=threads, chunk_duration="1s", progress_bar=False)
+    else:
+        # No usable /dev/shm (AWS Lambda, docker --ipc none): process pools cannot even create their
+        # locks, so SpikeInterface runs its chunked steps on threads, and the PCA metrics in one process.
+        si.set_global_job_kwargs(n_jobs=threads, chunk_duration="1s", progress_bar=False, pool_engine="thread")
+        log.info("no usable /dev/shm: SpikeInterface jobs on %d threads instead of processes, shared arrays in "
+                 "process memory", threads)
+        import spikeinterface.sortingcomponents.tools  # noqa: F401 - loaded before its functions are patched
+        import contextlib as _cl
+
+        _no_shm = _cl.ExitStack()
+        _no_shm.enter_context(__import__("processor.shm", fromlist=["x"]).local_shared_memory(True))
     np.random.seed(p["SEED"])
 
     found = discover(input_dir)
@@ -408,7 +423,7 @@ def main() -> int:
             if p["AUTO_MERGE"] and n_before > 1:
                 t_m = time.monotonic()
                 with Heartbeat(f"{sid}: auto-merge"):
-                    sorting, merges = C.auto_merge(sorting, recording, p)
+                    sorting, merges = C.auto_merge(sorting, recording, p, threads)
                 log.info("%s: auto-merge (SLAy): %d groups merged, %d -> %d units, %.1fs", sid, len(merges),
                          n_before, sorting.get_num_units(), time.monotonic() - t_m)
                 for new_id, group in merges:
@@ -428,7 +443,7 @@ def main() -> int:
                 log.info("%s: %s", sid, thr_note)
             work = work_root / sid
             with Heartbeat(f"{sid}: analyzer"):
-                analyzer, win, timings = C.build_analyzer(sorting, recording, work, p, duration)
+                analyzer, win, timings = C.build_analyzer(sorting, recording, work, p, duration, threads)
             t_b = time.monotonic()
             with Heartbeat(f"{sid}: bombcell"):
                 bc = C.run_bombcell(analyzer, sess_thr, win, top / f"{sid}_bombcell", threads)
@@ -437,7 +452,7 @@ def main() -> int:
             if p["PCA_METRICS"]:
                 t_p = time.monotonic()
                 with Heartbeat(f"{sid}: PCA metrics"):
-                    pcam = C.pca_metrics(analyzer, seed=p["SEED"], n_jobs=threads)
+                    pcam = C.pca_metrics(analyzer, seed=p["SEED"], n_jobs=threads if process_pools else 1)
                 metrics = metrics.join(pcam.reindex(metrics.index), how="left")
                 timings["pca_metrics"] = round(time.monotonic() - t_p, 2)
                 log.info("  PCA metrics: %.1fs", timings["pca_metrics"])

@@ -87,7 +87,7 @@ def session_thresholds(thresholds: dict, duration_s: float, overrides: dict) -> 
     return thr, ""
 
 
-def auto_merge(sorting, recording, p: dict) -> tuple:
+def auto_merge(sorting, recording, p: dict, threads: int = 1) -> tuple:
     """Merge over-split units with SpikeInterface's SLAy preset (Koukuntla et al. 2025).
 
     A light in-memory analyzer (sampled spikes, noise levels, templates; the preset computes the
@@ -99,12 +99,19 @@ def auto_merge(sorting, recording, p: dict) -> tuple:
     import spikeinterface.full as si
     from spikeinterface.curation import compute_merge_unit_groups
 
-    pre = si.create_sorting_analyzer(sorting, recording, format="memory", sparse=True, method="radius",
-                                     radius_um=p["SPARSITY_RADIUS_UM"], return_in_uV=True)
-    pre.compute({"random_spikes": dict(method="uniform", max_spikes_per_unit=p["MAX_SPIKES_PER_UNIT"],
-                                       seed=p["SEED"]),
-                 "noise_levels": dict(random_slices_kwargs=dict(seed=p["SEED"])),
-                 "templates": dict(ms_before=2.0, ms_after=3.0)})
+    from processor.shm import local_shared_memory, template_jobs
+
+    n_jobs, local, why = template_jobs(sorting.get_num_units(), recording, p["SPARSITY_RADIUS_UM"], threads)
+    log.info("  template estimation: %s", why)
+    with local_shared_memory(local):
+        pre = si.create_sorting_analyzer(sorting, recording, format="memory", sparse=True,
+                                         sparsity_kwargs=dict(method="radius", radius_um=p["SPARSITY_RADIUS_UM"]),
+                                         return_in_uV=True, job_kwargs=dict(n_jobs=n_jobs, progress_bar=False),
+                                         seed=p["SEED"])
+        pre.compute({"random_spikes": dict(method="uniform", max_spikes_per_unit=p["MAX_SPIKES_PER_UNIT"],
+                                           seed=p["SEED"]),
+                     "noise_levels": dict(random_slices_kwargs=dict(seed=p["SEED"]))})
+        pre.compute("templates", ms_before=2.0, ms_after=3.0, n_jobs=n_jobs, progress_bar=False)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         groups = compute_merge_unit_groups(pre, preset="slay", resolve_graph=True, force_copy=False)
@@ -124,14 +131,20 @@ def auto_merge(sorting, recording, p: dict) -> tuple:
     return merged, out
 
 
-def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float):
+def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float, threads: int = 1):
     import spikeinterface.full as si
+
+    from processor.shm import local_shared_memory, template_jobs
 
     if work.exists():
         shutil.rmtree(work)
-    analyzer = si.create_sorting_analyzer(
-        sorting, recording, format="binary_folder", folder=work, sparse=True, method="radius",
-        radius_um=p["SPARSITY_RADIUS_UM"], return_in_uV=True, overwrite=True)
+    n_jobs, local, why = template_jobs(sorting.get_num_units(), recording, p["SPARSITY_RADIUS_UM"], threads)
+    log.info("  template estimation (main channels): %s", why)
+    with local_shared_memory(local):
+        analyzer = si.create_sorting_analyzer(
+            sorting, recording, format="binary_folder", folder=work, sparse=True,
+            sparsity_kwargs=dict(method="radius", radius_um=p["SPARSITY_RADIUS_UM"]), return_in_uV=True,
+            overwrite=True, job_kwargs=dict(n_jobs=n_jobs, progress_bar=False), seed=p["SEED"])
     win = metric_windows(duration_s)
     qm_params = {"presence_ratio": {"bin_duration_s": win["presence_ratio_bin_duration_s"]},
                  "drift": {"interval_s": win["drift_interval_s"],
@@ -150,7 +163,12 @@ def build_analyzer(sorting, recording, work: Path, p: dict, duration_s: float):
         ("template_metrics", dict(include_multi_channel_metrics=True)),
     ]
     if p["PCA_METRICS"]:
-        steps.append(("principal_components", dict(n_components=5, mode="by_channel_local", whiten=True)))
+        pc = dict(n_components=5, mode="by_channel_local", whiten=True)
+        from processor.shm import shm_usable
+
+        if not shm_usable():
+            pc["n_jobs"] = 1      # its fitting uses a process pool whatever the pool engine
+        steps.append(("principal_components", pc))
     # The PCA metrics are computed afterwards, one unit at a time (pca_metrics()): SpikeInterface's
     # quality_metrics prepares the PCA data of every unit's neighbourhood at once, which needs
     # several GB for a few hundred units.

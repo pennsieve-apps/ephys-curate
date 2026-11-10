@@ -13,11 +13,15 @@ MODELS = {
     "SpikeInterface/UnitRefine_noise_neural_classifier": (
         "280cd07ff8310286ded5c0cfdb382e92e2a43a98",
         {"best_model.skops": "f946d77324393959a49e2b83df2083326ea5a934e068eb48f2a362a11e551067",
-         "model_info.json": None, "metadata.json": None, "README.md": None}),
+         "model_info.json": "c2451add5212c504273b03f6be79e1b2673966eac1a33f4a56764dd5f0c932b6",
+         "metadata.json": "c96f1e86341e43b2ea5fcdcadde4753bc5936f55677ffa285dae0f9182321a0c",
+         "README.md": None}),
     "SpikeInterface/UnitRefine_sua_mua_classifier": (
         "9ee216e7e0e7dbf0778cb07a8d1753700dbbad3b",
         {"best_model.skops": "9f0417c29c1b9828add06ea1b26740c853152c87e3bb1dafeb006c52e5ec04c4",
-         "model_info.json": None, "metadata.json": None, "README.md": None}),
+         "model_info.json": "404872fe6027c1d39c2cc1f0dae426a68fd48284aa39494a89c07ac10747b79a",
+         "metadata.json": "c96f1e86341e43b2ea5fcdcadde4753bc5936f55677ffa285dae0f9182321a0c",
+         "README.md": None}),
 }
 
 
