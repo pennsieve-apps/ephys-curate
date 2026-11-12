@@ -1,5 +1,6 @@
 cff-version: 1.2.0
-message: If you use this app, please cite it and the works it builds on, listed under references.
+message: >-
+  If you use this app, please cite the work it implements (preferred-citation), this release, and Pennsieve (RRID:SCR_021677); the other works it builds on are listed under references.
 type: software
 title: ephys-curate
 abstract: 'Automated curation of spike-sorted Neuropixels and other extracellular recordings: a SpikeInterface SortingAnalyzer
@@ -27,6 +28,34 @@ keywords:
 - bombcell
 - unitrefine
 - spikeinterface
+# The work this app implements; the release report's "How to cite" puts it first.
+preferred-citation:
+  type: article
+  title: SpikeInterface, a unified framework for spike sorting
+  authors:
+  - family-names: Buccino
+    given-names: Alessio P
+  - family-names: Hurwitz
+    given-names: Cole L
+  - family-names: Garcia
+    given-names: Samuel
+  - family-names: Magland
+    given-names: Jeremy
+  - family-names: Siegle
+    given-names: Joshua H
+  - family-names: Hurwitz
+    given-names: Roger
+  - family-names: Hennig
+    given-names: Matthias H
+  year: 2020
+  journal: eLife
+  volume: 9
+  start: e61834
+  doi: 10.7554/eLife.61834
+  identifiers:
+  - type: other
+    value: '33170122'
+    description: PubMed ID (PMID)
 references:
 - type: article
   title: SpikeInterface, a unified framework for spike sorting
